@@ -165,29 +165,24 @@ function DocRow({ d, memberName, members, onChanged }: { d: Doc; memberName: str
 
 function UploadDialog({ members, onDone }: { members: Member[]; onDone: () => void }) {
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({
-    member_id: "", document_name: "", category: "Identity",
-    description: "", keywords: "", upload_date: new Date().toISOString().slice(0, 10),
-  });
+  const [form, setForm] = useState({ member_id: "", document_name: "" });
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
 
   const submit = async () => {
-    if (!file) return toast.error("Select a PDF");
+    if (!file) return toast.error("Select a PDF or image");
     if (!form.member_id || !form.document_name) return toast.error("Fill required fields");
     setBusy(true);
     try {
       const path = `${form.member_id}/${Date.now()}-${file.name.replace(/[^\w.\-]+/g, "_")}`;
-      const up = await supabase.storage.from("documents").upload(path, file, { contentType: file.type || "application/pdf" });
+      const up = await supabase.storage.from("documents").upload(path, file, { contentType: file.type || "application/octet-stream" });
       if (up.error) throw up.error;
       const { data: userData } = await supabase.auth.getUser();
       const ins = await supabase.from("documents").insert({
         member_id: form.member_id,
         document_name: form.document_name,
-        category: form.category,
-        description: form.description || null,
-        keywords: form.keywords || null,
-        upload_date: form.upload_date,
+        category: "Other",
+        upload_date: new Date().toISOString().slice(0, 10),
         file_path: path,
         file_name: file.name,
         uploaded_by: userData.user?.id ?? null,
@@ -195,7 +190,7 @@ function UploadDialog({ members, onDone }: { members: Member[]; onDone: () => vo
       if (ins.error) throw ins.error;
       toast.success("Uploaded");
       setOpen(false); setFile(null);
-      setForm({ member_id: "", document_name: "", category: "Identity", description: "", keywords: "", upload_date: new Date().toISOString().slice(0, 10) });
+      setForm({ member_id: "", document_name: "" });
       onDone();
     } catch (e: any) { toast.error(e.message ?? "Upload failed"); }
     finally { setBusy(false); }
@@ -207,7 +202,7 @@ function UploadDialog({ members, onDone }: { members: Member[]; onDone: () => vo
         <Button className="rounded-full gradient-primary border-0"><Upload className="mr-2 h-4 w-4" /> Upload Document</Button>
       </DialogTrigger>
       <DialogContent className="max-w-lg">
-        <DialogHeader><DialogTitle>Upload Certificate</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle>Upload Document</DialogTitle></DialogHeader>
         <div className="grid gap-3">
           <Field label="Family Member">
             <Select value={form.member_id} onValueChange={(v) => setForm({ ...form, member_id: v })}>
@@ -215,20 +210,10 @@ function UploadDialog({ members, onDone }: { members: Member[]; onDone: () => vo
               <SelectContent>{members.map((m) => <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>)}</SelectContent>
             </Select>
           </Field>
-          <Field label="Document Name"><Input value={form.document_name} onChange={(e) => setForm({ ...form, document_name: e.target.value })} /></Field>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Category">
-              <Select value={form.category} onValueChange={(v) => setForm({ ...form, category: v })}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>{CATEGORIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
-              </Select>
-            </Field>
-            <Field label="Upload Date"><Input type="date" value={form.upload_date} onChange={(e) => setForm({ ...form, upload_date: e.target.value })} /></Field>
-          </div>
-          <Field label="Keywords (comma separated)"><Input value={form.keywords} onChange={(e) => setForm({ ...form, keywords: e.target.value })} /></Field>
-          <Field label="Description"><Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={3} /></Field>
-          <Field label="PDF File"><Input type="file" accept="application/pdf" onChange={(e) => setFile(e.target.files?.[0] ?? null)} /></Field>
+          <Field label="Document Name"><Input value={form.document_name} onChange={(e) => setForm({ ...form, document_name: e.target.value })} placeholder="e.g. Passport, Aadhaar, Photo" /></Field>
+          <Field label="File (PDF or Photo)"><Input type="file" accept="application/pdf,image/*" onChange={(e) => setFile(e.target.files?.[0] ?? null)} /></Field>
         </div>
+
         <DialogFooter>
           <Button variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
           <Button onClick={submit} disabled={busy} className="gradient-primary border-0">
