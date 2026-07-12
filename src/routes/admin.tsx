@@ -270,6 +270,7 @@ function UploadDialog({ members, onDone }: { members: Member[]; onDone: () => vo
         document_name: form.document_name,
         registration_number: form.registration_number || null,
         document_date: form.document_date || null,
+        category: "Document",
         upload_date: new Date().toISOString().slice(0, 10),
         file_path: path,
         file_name: file.name,
