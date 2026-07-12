@@ -26,7 +26,7 @@ function AuthPage() {
     setBusy(false);
     if (res.error) return toast.error(res.error);
     toast.success(mode === "in" ? "Signed in" : "Account created");
-    navigate({ to: "/" });
+    navigate({ to: "/admin" });
   };
 
   return (
