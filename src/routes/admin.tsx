@@ -268,20 +268,10 @@ function EditDialog({ d, members, onClose, onDone }: { d: Doc; members: Member[]
             </Select>
           </Field>
           <Field label="Document Name"><Input value={form.document_name} onChange={(e) => setForm({ ...form, document_name: e.target.value })} /></Field>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Category">
-              <Select value={form.category} onValueChange={(v) => setForm({ ...form, category: v })}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>{CATEGORIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
-              </Select>
-            </Field>
-            <Field label="Upload Date"><Input type="date" value={form.upload_date} onChange={(e) => setForm({ ...form, upload_date: e.target.value })} /></Field>
-          </div>
-          <Field label="Keywords"><Input value={form.keywords ?? ""} onChange={(e) => setForm({ ...form, keywords: e.target.value })} /></Field>
-          <Field label="Description"><Textarea value={form.description ?? ""} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={3} /></Field>
           <Field label={`Replace file (current: ${d.file_name})`}>
-            <Input type="file" accept="application/pdf" onChange={(e) => setReplace(e.target.files?.[0] ?? null)} />
+            <Input type="file" accept="application/pdf,image/*" onChange={(e) => setReplace(e.target.files?.[0] ?? null)} />
           </Field>
+
         </div>
         <DialogFooter>
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
