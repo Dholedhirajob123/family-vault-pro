@@ -10,7 +10,6 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as SearchRouteImport } from './routes/search'
-import { Route as CategoriesRouteImport } from './routes/categories'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
@@ -20,11 +19,6 @@ import { Route as MembersSlugRouteImport } from './routes/members.$slug'
 const SearchRoute = SearchRouteImport.update({
   id: '/search',
   path: '/search',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const CategoriesRoute = CategoriesRouteImport.update({
-  id: '/categories',
-  path: '/categories',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthRoute = AuthRouteImport.update({
@@ -57,7 +51,6 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/auth': typeof AuthRoute
-  '/categories': typeof CategoriesRoute
   '/search': typeof SearchRoute
   '/members/$slug': typeof MembersSlugRoute
   '/members/': typeof MembersIndexRoute
@@ -66,7 +59,6 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/auth': typeof AuthRoute
-  '/categories': typeof CategoriesRoute
   '/search': typeof SearchRoute
   '/members/$slug': typeof MembersSlugRoute
   '/members': typeof MembersIndexRoute
@@ -76,7 +68,6 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/auth': typeof AuthRoute
-  '/categories': typeof CategoriesRoute
   '/search': typeof SearchRoute
   '/members/$slug': typeof MembersSlugRoute
   '/members/': typeof MembersIndexRoute
@@ -87,25 +78,16 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/auth'
-    | '/categories'
     | '/search'
     | '/members/$slug'
     | '/members/'
   fileRoutesByTo: FileRoutesByTo
-  to:
-    | '/'
-    | '/admin'
-    | '/auth'
-    | '/categories'
-    | '/search'
-    | '/members/$slug'
-    | '/members'
+  to: '/' | '/admin' | '/auth' | '/search' | '/members/$slug' | '/members'
   id:
     | '__root__'
     | '/'
     | '/admin'
     | '/auth'
-    | '/categories'
     | '/search'
     | '/members/$slug'
     | '/members/'
@@ -115,7 +97,6 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRoute
   AuthRoute: typeof AuthRoute
-  CategoriesRoute: typeof CategoriesRoute
   SearchRoute: typeof SearchRoute
   MembersSlugRoute: typeof MembersSlugRoute
   MembersIndexRoute: typeof MembersIndexRoute
@@ -128,13 +109,6 @@ declare module '@tanstack/react-router' {
       path: '/search'
       fullPath: '/search'
       preLoaderRoute: typeof SearchRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/categories': {
-      id: '/categories'
-      path: '/categories'
-      fullPath: '/categories'
-      preLoaderRoute: typeof CategoriesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/auth': {
@@ -179,7 +153,6 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRoute,
   AuthRoute: AuthRoute,
-  CategoriesRoute: CategoriesRoute,
   SearchRoute: SearchRoute,
   MembersSlugRoute: MembersSlugRoute,
   MembersIndexRoute: MembersIndexRoute,
