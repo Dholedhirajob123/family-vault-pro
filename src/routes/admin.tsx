@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Upload, Trash2, Pencil, Eye, Download, ShieldCheck, Loader2, KeyRound, Lock, Unlock } from "lucide-react";
+import { Upload, Trash2, Pencil, Eye, Download, Loader2, KeyRound, Lock, Unlock, Plus } from "lucide-react";
 
 export const Route = createFileRoute("/admin")({
   component: AdminPage,
@@ -30,7 +30,7 @@ async function signedUrl(path: string) {
 }
 
 function AdminPage() {
-  const { user, isAdmin, loading } = useAuth();
+  const { user, loading } = useAuth();
   const navigate = useNavigate();
   const qc = useQueryClient();
 
@@ -46,7 +46,7 @@ function AdminPage() {
 
   const { data: docs = [], refetch } = useQuery({
     queryKey: ["docs-admin"],
-    enabled: isAdmin,
+    enabled: !!user,
     queryFn: async () => (await supabase.from("documents").select("id,member_id,document_name,registration_number,document_date,file_path,file_name,upload_date").order("created_at", { ascending: false })).data as Doc[] ?? [],
   });
 
@@ -57,37 +57,13 @@ function AdminPage() {
     return docs.filter((d) => [d.document_name, d.file_name, d.registration_number ?? ""].some((v) => v.toLowerCase().includes(s)));
   }, [docs, filter]);
 
-  const memberName = (id: string) => members.find((m) => m.id === id)?.name ?? "—";
-
-  const [claiming, setClaiming] = useState(false);
-  const claimAdmin = async () => {
-    setClaiming(true);
-    const { data, error } = await supabase.rpc("claim_first_admin");
-    setClaiming(false);
-    if (error) return toast.error(error.message);
-    if (data) { toast.success("You are now the admin."); window.location.reload(); }
-    else toast.error("An admin already exists. Ask them to grant you access.");
+  const memberName = (id: string) => {
+    if (id === "other") return "Other";
+    return members.find((m) => m.id === id)?.name ?? "—";
   };
 
   if (loading) return <div className="p-8 text-center text-muted-foreground">Loading…</div>;
   if (!user) return null;
-
-  if (!isAdmin) {
-    return (
-      <Card className="glass mx-auto max-w-md rounded-3xl border-0 p-8 text-center">
-        <div className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-2xl gradient-primary">
-          <ShieldCheck className="h-6 w-6" />
-        </div>
-        <h1 className="text-xl font-bold">Admin access required</h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Signed in as <span className="font-medium">{user.email}</span>. If you're the first person setting this up, claim admin access below.
-        </p>
-        <Button onClick={claimAdmin} disabled={claiming} className="mt-4 rounded-full gradient-primary border-0">
-          {claiming && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Claim admin access
-        </Button>
-      </Card>
-    );
-  }
 
   const refreshAll = () => {
     refetch();
@@ -103,7 +79,10 @@ function AdminPage() {
           <h1 className="text-3xl font-extrabold">Admin Dashboard</h1>
           <p className="text-sm text-muted-foreground">Upload documents and set access passwords per family member.</p>
         </div>
-        <UploadDialog members={members} onDone={refreshAll} />
+        <div className="flex gap-2">
+          <AddMemberDialog onDone={refreshAll} />
+          <UploadDialog members={members} onDone={refreshAll} />
+        </div>
       </div>
 
       <Card className="glass rounded-3xl border-0 p-4 md:p-6">
@@ -153,15 +132,47 @@ function AdminPage() {
 function MemberPasswordCard({ m, onDone }: { m: Member; onDone: () => void }) {
   const [open, setOpen] = useState(false);
   const [pwd, setPwd] = useState("");
+  const [confirmPwd, setConfirmPwd] = useState("");
   const [busy, setBusy] = useState(false);
 
   const save = async () => {
+    if (!pwd) {
+      const { error } = await supabase.rpc("set_member_password", { _member_id: m.id, _new_password: "" });
+      if (error) return toast.error(error.message);
+      toast.success("Password removed");
+      setPwd(""); setConfirmPwd(""); setOpen(false); onDone();
+      return;
+    }
+    
+    if (pwd !== confirmPwd) return toast.error("Passwords do not match");
+    if (pwd.length < 3) return toast.error("Password must be at least 3 characters");
+    
     setBusy(true);
     const { error } = await supabase.rpc("set_member_password", { _member_id: m.id, _new_password: pwd });
     setBusy(false);
     if (error) return toast.error(error.message);
-    toast.success(pwd ? "Password updated" : "Password removed");
-    setPwd(""); setOpen(false); onDone();
+    toast.success("Password updated");
+    setPwd(""); setConfirmPwd(""); setOpen(false); onDone();
+  };
+
+  const deleteMember = async () => {
+    if (!confirm(`Delete "${m.name}" and all their documents? This cannot be undone.`)) return;
+    try {
+      // Delete all documents for this member
+      const { data: memberDocs } = await supabase.from("documents").select("file_path").eq("member_id", m.id);
+      if (memberDocs && memberDocs.length > 0) {
+        const filePaths = memberDocs.map((d: any) => d.file_path);
+        await supabase.storage.from("documents").remove(filePaths);
+        await supabase.from("documents").delete().eq("member_id", m.id);
+      }
+      // Delete member
+      const { error } = await supabase.from("family_members").delete().eq("id", m.id);
+      if (error) throw error;
+      toast.success("Member deleted");
+      onDone();
+    } catch (e: any) {
+      toast.error(e.message ?? "Failed to delete member");
+    }
   };
 
   return (
@@ -172,24 +183,38 @@ function MemberPasswordCard({ m, onDone }: { m: Member; onDone: () => void }) {
           {m.password_hash ? <><Lock className="h-3 w-3" /> Protected</> : <><Unlock className="h-3 w-3" /> Open</>}
         </div>
       </div>
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogTrigger asChild>
-          <Button size="sm" variant="outline" className="rounded-full"><KeyRound className="mr-1 h-3.5 w-3.5" /> Set password</Button>
-        </DialogTrigger>
-        <DialogContent className="max-w-sm">
-          <DialogHeader><DialogTitle>Password for {m.name}</DialogTitle></DialogHeader>
-          <div className="grid gap-2">
-            <Label htmlFor={`pw-${m.id}`}>New password</Label>
-            <Input id={`pw-${m.id}`} type="text" value={pwd} onChange={(e) => setPwd(e.target.value)} placeholder="Leave blank to remove password" />
-          </div>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
-            <Button onClick={save} disabled={busy} className="gradient-primary border-0">
-              {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Save
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <div className="flex gap-1">
+        <Dialog open={open} onOpenChange={setOpen}>
+          <DialogTrigger asChild>
+            <Button size="sm" variant="outline" className="rounded-full"><KeyRound className="mr-1 h-3.5 w-3.5" /> Set password</Button>
+          </DialogTrigger>
+          <DialogContent className="max-w-sm">
+            <DialogHeader><DialogTitle>Password for {m.name}</DialogTitle></DialogHeader>
+            <div className="grid gap-3">
+              <div>
+                <Label htmlFor={`pw-${m.id}`}>New password</Label>
+                <Input id={`pw-${m.id}`} type="password" value={pwd} onChange={(e) => setPwd(e.target.value)} placeholder="Leave blank to remove password" />
+              </div>
+              {pwd && (
+                <div>
+                  <Label htmlFor={`cpw-${m.id}`}>Confirm password</Label>
+                  <Input id={`cpw-${m.id}`} type="password" value={confirmPwd} onChange={(e) => setConfirmPwd(e.target.value)} placeholder="Re-enter password" />
+                  {pwd !== confirmPwd && confirmPwd && <p className="mt-1 text-xs text-destructive">Passwords do not match</p>}
+                </div>
+              )}
+            </div>
+            <DialogFooter>
+              <Button variant="ghost" onClick={() => { setOpen(false); setPwd(""); setConfirmPwd(""); }}>Cancel</Button>
+              <Button onClick={save} disabled={busy || (pwd && pwd !== confirmPwd)} className="gradient-primary border-0">
+                {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Save
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+        <Button size="sm" variant="ghost" className="rounded-full text-destructive hover:bg-destructive/10" onClick={deleteMember}>
+          <Trash2 className="h-3.5 w-3.5" />
+        </Button>
+      </div>
     </div>
   );
 }
@@ -243,7 +268,6 @@ function UploadDialog({ members, onDone }: { members: Member[]; onDone: () => vo
       const ins = await supabase.from("documents").insert({
         member_id: form.member_id,
         document_name: form.document_name,
-        category: "Other",
         registration_number: form.registration_number || null,
         document_date: form.document_date || null,
         upload_date: new Date().toISOString().slice(0, 10),
@@ -271,7 +295,10 @@ function UploadDialog({ members, onDone }: { members: Member[]; onDone: () => vo
           <Field label="Family Member">
             <Select value={form.member_id} onValueChange={(v) => setForm({ ...form, member_id: v })}>
               <SelectTrigger><SelectValue placeholder="Select member" /></SelectTrigger>
-              <SelectContent>{members.map((m) => <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>)}</SelectContent>
+              <SelectContent>
+                {members.map((m) => <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>)}
+                <SelectItem value="other">Other</SelectItem>
+              </SelectContent>
             </Select>
           </Field>
           <Field label="Document Name"><Input value={form.document_name} onChange={(e) => setForm({ ...form, document_name: e.target.value })} placeholder="e.g. Passport, Aadhaar, Photo" /></Field>
@@ -334,7 +361,10 @@ function EditDialog({ d, members, onClose, onDone }: { d: Doc; members: Member[]
           <Field label="Family Member">
             <Select value={form.member_id} onValueChange={(v) => setForm({ ...form, member_id: v })}>
               <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>{members.map((m) => <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>)}</SelectContent>
+              <SelectContent>
+                {members.map((m) => <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>)}
+                <SelectItem value="other">Other</SelectItem>
+              </SelectContent>
             </Select>
           </Field>
           <Field label="Document Name"><Input value={form.document_name} onChange={(e) => setForm({ ...form, document_name: e.target.value })} /></Field>
@@ -359,4 +389,63 @@ function EditDialog({ d, members, onClose, onDone }: { d: Doc; members: Member[]
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return <div className="grid gap-1.5"><Label>{label}</Label>{children}</div>;
+}
+
+function AddMemberDialog({ onDone }: { onDone: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    if (!name.trim()) return toast.error("Enter member name");
+    setBusy(true);
+    try {
+      const slug = name.toLowerCase().trim().replace(/\s+/g, "-").replace(/[^\w\-]/g, "");
+      const { data: lastMember } = await supabase.from("family_members").select("sort_order").order("sort_order", { ascending: false }).limit(1).maybeSingle();
+      const sort_order = (lastMember?.sort_order ?? 0) + 1;
+      
+      const { error } = await supabase.from("family_members").insert({
+        name: name.trim(),
+        slug,
+        sort_order,
+      });
+      if (error) throw error;
+      toast.success("Member added");
+      setName("");
+      setOpen(false);
+      onDone();
+    } catch (e: any) {
+      toast.error(e.message ?? "Failed to add member");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button className="rounded-full gradient-primary border-0"><Plus className="mr-2 h-4 w-4" /> Add Member</Button>
+      </DialogTrigger>
+      <DialogContent className="max-w-sm">
+        <DialogHeader><DialogTitle>Add Family Member</DialogTitle></DialogHeader>
+        <div className="grid gap-3">
+          <Field label="Member Name">
+            <Input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && submit()}
+              placeholder="e.g. John Dhole"
+              autoFocus
+            />
+          </Field>
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
+          <Button onClick={submit} disabled={busy} className="gradient-primary border-0">
+            {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Add Member
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
 }

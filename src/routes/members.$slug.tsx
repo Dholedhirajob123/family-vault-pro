@@ -37,6 +37,10 @@ function MemberPage() {
   const [unlocked, setUnlocked] = useState(false);
   const [pwd, setPwd] = useState("");
   const [checking, setChecking] = useState(false);
+  const [showReset, setShowReset] = useState(false);
+  const [resetPwd, setResetPwd] = useState("");
+  const [resetConfirmPwd, setResetConfirmPwd] = useState("");
+  const [resetting, setResetting] = useState(false);
 
   const memberQ = useQuery({
     queryKey: ["member", slug],
@@ -111,6 +115,27 @@ function MemberPage() {
     }
   };
 
+  const submitReset = async () => {
+    if (!resetPwd) return toast.error("Enter new password");
+    if (resetPwd !== resetConfirmPwd) return toast.error("Passwords do not match");
+    if (resetPwd.length < 3) return toast.error("Password must be at least 3 characters");
+    
+    setResetting(true);
+    try {
+      const { error } = await supabase.rpc("set_member_password", { _member_id: memberQ.data!.id, _new_password: resetPwd });
+      if (error) throw error;
+      toast.success("Password reset successful. Please enter your new password.");
+      setShowReset(false);
+      setResetPwd("");
+      setResetConfirmPwd("");
+      setPwd("");
+    } catch (e: any) {
+      toast.error(e.message ?? "Failed to reset password");
+    } finally {
+      setResetting(false);
+    }
+  };
+
   if (memberQ.isLoading) return <div className="p-8 text-center text-muted-foreground">Loading…</div>;
   if (!memberQ.data) return <div className="p-8 text-center">Member not found.</div>;
 
@@ -122,30 +147,87 @@ function MemberPage() {
         <Link to="/" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
           <ArrowLeft className="h-4 w-4" /> Back to Home
         </Link>
-        <Card className="glass rounded-3xl border-0 p-8 text-center">
-          <div className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-2xl gradient-primary">
-            <Lock className="h-6 w-6" />
-          </div>
-          <h1 className="text-xl font-bold">{m.name}</h1>
-          <p className="mt-1 text-sm text-muted-foreground">Enter the password set by the admin to view this member's documents.</p>
-          <div className="mt-5 space-y-3 text-left">
-            <div>
-              <Label htmlFor="mp">Password</Label>
-              <Input
-                id="mp"
-                type="password"
-                value={pwd}
-                onChange={(e) => setPwd(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && submitPassword()}
-                className="rounded-xl"
-                autoFocus
-              />
+        {!showReset ? (
+          <Card className="glass rounded-3xl border-0 p-8 text-center">
+            <div className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-2xl gradient-primary">
+              <Lock className="h-6 w-6" />
             </div>
-            <Button onClick={submitPassword} disabled={checking} className="w-full rounded-full gradient-primary border-0">
-              {checking && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Unlock
+            <h1 className="text-xl font-bold">{m.name}</h1>
+            <p className="mt-1 text-sm text-muted-foreground">Enter the password set by the admin to view this member's documents.</p>
+            <div className="mt-5 space-y-3 text-left">
+              <div>
+                <Label htmlFor="mp">Password</Label>
+                <Input
+                  id="mp"
+                  type="password"
+                  value={pwd}
+                  onChange={(e) => setPwd(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && submitPassword()}
+                  className="rounded-xl"
+                  autoFocus
+                />
+              </div>
+              <Button onClick={submitPassword} disabled={checking} className="w-full rounded-full gradient-primary border-0">
+                {checking && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Unlock
+              </Button>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowReset(true)}
+              className="mt-3 text-xs text-muted-foreground hover:text-foreground w-full"
+            >
+              Forgot password? Reset here
             </Button>
-          </div>
-        </Card>
+          </Card>
+        ) : (
+          <Card className="glass rounded-3xl border-0 p-8 text-center">
+            <div className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-2xl gradient-primary">
+              <Lock className="h-6 w-6" />
+            </div>
+            <h1 className="text-xl font-bold">Reset Password</h1>
+            <p className="mt-1 text-sm text-muted-foreground">Create a new password for {m.name}</p>
+            <div className="mt-5 space-y-3 text-left">
+              <div>
+                <Label htmlFor="rp">New Password</Label>
+                <Input
+                  id="rp"
+                  type="password"
+                  value={resetPwd}
+                  onChange={(e) => setResetPwd(e.target.value)}
+                  className="rounded-xl"
+                  autoFocus
+                  placeholder="At least 3 characters"
+                />
+              </div>
+              <div>
+                <Label htmlFor="rcp">Confirm Password</Label>
+                <Input
+                  id="rcp"
+                  type="password"
+                  value={resetConfirmPwd}
+                  onChange={(e) => setResetConfirmPwd(e.target.value)}
+                  className="rounded-xl"
+                  placeholder="Re-enter password"
+                />
+                {resetPwd && resetConfirmPwd && resetPwd !== resetConfirmPwd && (
+                  <p className="mt-1 text-xs text-destructive">Passwords do not match</p>
+                )}
+              </div>
+              <Button onClick={submitReset} disabled={resetting || (resetPwd && resetPwd !== resetConfirmPwd)} className="w-full rounded-full gradient-primary border-0">
+                {resetting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Reset Password
+              </Button>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => { setShowReset(false); setResetPwd(""); setResetConfirmPwd(""); }}
+              className="mt-3 text-xs text-muted-foreground hover:text-foreground w-full"
+            >
+              Back to login
+            </Button>
+          </Card>
+        )}
       </div>
     );
   }

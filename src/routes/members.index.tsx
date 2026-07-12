@@ -2,7 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Card } from "@/components/ui/card";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, Lock, Unlock } from "lucide-react";
 
 export const Route = createFileRoute("/members/")({
   component: MembersIndex,
@@ -14,7 +14,7 @@ function MembersIndex() {
   const { data: members = [] } = useQuery({
     queryKey: ["members"],
     queryFn: async () => {
-      const { data, error } = await supabase.from("family_members").select("id,name,slug").order("sort_order");
+      const { data, error } = await supabase.from("family_members").select("id,name,slug,password_hash").order("sort_order");
       if (error) throw error;
       return data;
     },
@@ -44,7 +44,10 @@ function MembersIndex() {
                 </div>
                 <div className="flex-1">
                   <div className="text-lg font-semibold">{m.name}</div>
-                  <div className="text-sm text-muted-foreground">{counts.get(m.id) ?? 0} certificates</div>
+                  <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                    {m.password_hash ? <><Lock className="h-3 w-3" /> Protected</> : <><Unlock className="h-3 w-3" /> Open</>}
+                  </div>
+                  <div className="text-sm text-muted-foreground">{counts.get(m.id) ?? 0} document{(counts.get(m.id) ?? 0) === 1 ? "" : "s"}</div>
                 </div>
                 <ArrowRight className="h-4 w-4 text-muted-foreground" />
               </div>

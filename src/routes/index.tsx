@@ -4,8 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ArrowRight, Files, FolderOpen, Calendar, Users } from "lucide-react";
-import { categoryBadgeClass } from "@/lib/categories";
+import { ArrowRight, Files, Calendar, Users } from "lucide-react";
 
 export const Route = createFileRoute("/")({
   component: Home,
@@ -19,7 +18,6 @@ interface Member {
 interface Doc {
   id: string;
   document_name: string;
-  category: string;
   upload_date: string;
   member_id: string;
   created_at: string;
@@ -52,7 +50,7 @@ function Home() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("documents")
-        .select("id,document_name,category,upload_date,member_id,created_at")
+        .select("id,document_name,upload_date,member_id,created_at")
         .order("created_at", { ascending: false });
       if (error) throw error;
       return data as Doc[];
@@ -63,12 +61,9 @@ function Home() {
   const docs = docsQ.data ?? [];
   const totalDocs = docs.length;
   const countsByMember = new Map<string, number>();
-  const countsByCategory = new Map<string, number>();
   docs.forEach((d) => {
     countsByMember.set(d.member_id, (countsByMember.get(d.member_id) ?? 0) + 1);
-    countsByCategory.set(d.category, (countsByCategory.get(d.category) ?? 0) + 1);
   });
-  const latestUpload = docs[0]?.upload_date ?? null;
   const recent = docs.slice(0, 5);
 
   return (
@@ -85,11 +80,9 @@ function Home() {
               A secure, searchable home for every family document — Aadhaar, marksheets, property papers and more.
             </p>
           </div>
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-2">
             <Stat icon={<Users className="h-4 w-4" />} label="Members" value={members.length} />
             <Stat icon={<Files className="h-4 w-4" />} label="Certificates" value={totalDocs} />
-            <Stat icon={<FolderOpen className="h-4 w-4" />} label="Categories" value={countsByCategory.size} />
-            <Stat icon={<Calendar className="h-4 w-4" />} label="Latest" value={latestUpload ? new Date(latestUpload).toLocaleDateString() : "—"} />
           </div>
         </div>
       </section>
@@ -133,46 +126,7 @@ function Home() {
         </div>
       </section>
 
-      {/* Recent + categories */}
-      <section className="grid gap-4 lg:grid-cols-3">
-        <Card className="glass col-span-2 rounded-3xl border-0 p-6">
-          <h3 className="mb-4 text-lg font-semibold">Recently Added Documents</h3>
-          {recent.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No documents uploaded yet.</p>
-          ) : (
-            <ul className="divide-y divide-border/50">
-              {recent.map((d) => {
-                const m = members.find((x) => x.id === d.member_id);
-                return (
-                  <li key={d.id} className="flex items-center justify-between py-3">
-                    <div className="min-w-0">
-                      <div className="truncate font-medium">{d.document_name}</div>
-                      <div className="text-xs text-muted-foreground">
-                        {m?.name ?? "—"} · {new Date(d.upload_date).toLocaleDateString()}
-                      </div>
-                    </div>
-                    <span className={`shrink-0 rounded-full border px-2.5 py-0.5 text-xs ${categoryBadgeClass(d.category)}`}>{d.category}</span>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </Card>
-        <Card className="glass rounded-3xl border-0 p-6">
-          <h3 className="mb-4 text-lg font-semibold">Certificates by Category</h3>
-          {countsByCategory.size === 0 ? (
-            <p className="text-sm text-muted-foreground">Nothing yet.</p>
-          ) : (
-            <div className="flex flex-wrap gap-2">
-              {[...countsByCategory.entries()].map(([c, n]) => (
-                <span key={c} className={`rounded-full border px-3 py-1 text-xs font-medium ${categoryBadgeClass(c)}`}>
-                  {c} · {n}
-                </span>
-              ))}
-            </div>
-          )}
-        </Card>
-      </section>
+   
     </div>
   );
 }
