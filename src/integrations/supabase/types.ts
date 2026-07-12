@@ -19,12 +19,14 @@ export type Database = {
           category: string
           created_at: string
           description: string | null
+          document_date: string | null
           document_name: string
           file_name: string
           file_path: string
           id: string
           keywords: string | null
           member_id: string
+          registration_number: string | null
           updated_at: string
           upload_date: string
           uploaded_by: string | null
@@ -33,12 +35,14 @@ export type Database = {
           category: string
           created_at?: string
           description?: string | null
+          document_date?: string | null
           document_name: string
           file_name: string
           file_path: string
           id?: string
           keywords?: string | null
           member_id: string
+          registration_number?: string | null
           updated_at?: string
           upload_date?: string
           uploaded_by?: string | null
@@ -47,12 +51,14 @@ export type Database = {
           category?: string
           created_at?: string
           description?: string | null
+          document_date?: string | null
           document_name?: string
           file_name?: string
           file_path?: string
           id?: string
           keywords?: string | null
           member_id?: string
+          registration_number?: string | null
           updated_at?: string
           upload_date?: string
           uploaded_by?: string | null
@@ -72,6 +78,7 @@ export type Database = {
           created_at: string
           id: string
           name: string
+          password_hash: string | null
           slug: string
           sort_order: number
         }
@@ -79,6 +86,7 @@ export type Database = {
           created_at?: string
           id?: string
           name: string
+          password_hash?: string | null
           slug: string
           sort_order?: number
         }
@@ -86,6 +94,7 @@ export type Database = {
           created_at?: string
           id?: string
           name?: string
+          password_hash?: string | null
           slug?: string
           sort_order?: number
         }
@@ -123,6 +132,14 @@ export type Database = {
           _role: Database["public"]["Enums"]["app_role"]
           _user_id: string
         }
+        Returns: boolean
+      }
+      set_member_password: {
+        Args: { _member_id: string; _new_password: string }
+        Returns: boolean
+      }
+      verify_member_password: {
+        Args: { _password: string; _slug: string }
         Returns: boolean
       }
     }

@@ -7,22 +7,21 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { CATEGORIES, categoryBadgeClass } from "@/lib/categories";
-import { Upload, Trash2, Pencil, Eye, Download, ShieldCheck, Loader2 } from "lucide-react";
+import { Upload, Trash2, Pencil, Eye, Download, ShieldCheck, Loader2, KeyRound, Lock, Unlock } from "lucide-react";
 
 export const Route = createFileRoute("/admin")({
   component: AdminPage,
 });
 
-interface Member { id: string; name: string; slug: string; }
+interface Member { id: string; name: string; slug: string; password_hash: string | null; }
 interface Doc {
-  id: string; member_id: string; document_name: string; category: string;
-  description: string | null; keywords: string | null; file_path: string; file_name: string; upload_date: string;
+  id: string; member_id: string; document_name: string;
+  registration_number: string | null; document_date: string | null;
+  file_path: string; file_name: string; upload_date: string;
 }
 
 async function signedUrl(path: string) {
@@ -39,21 +38,23 @@ function AdminPage() {
     if (!loading && !user) navigate({ to: "/auth" });
   }, [loading, user, navigate]);
 
-  const { data: members = [] } = useQuery({
-    queryKey: ["members"],
-    queryFn: async () => (await supabase.from("family_members").select("*").order("sort_order")).data as Member[] ?? [],
+  const membersQ = useQuery({
+    queryKey: ["members-admin"],
+    queryFn: async () => (await supabase.from("family_members").select("id,name,slug,password_hash").order("sort_order")).data as Member[] ?? [],
   });
+  const members = membersQ.data ?? [];
+
   const { data: docs = [], refetch } = useQuery({
     queryKey: ["docs-admin"],
     enabled: isAdmin,
-    queryFn: async () => (await supabase.from("documents").select("*").order("created_at", { ascending: false })).data as Doc[] ?? [],
+    queryFn: async () => (await supabase.from("documents").select("id,member_id,document_name,registration_number,document_date,file_path,file_name,upload_date").order("created_at", { ascending: false })).data as Doc[] ?? [],
   });
 
   const [filter, setFilter] = useState("");
   const filtered = useMemo(() => {
     const s = filter.toLowerCase();
     if (!s) return docs;
-    return docs.filter((d) => [d.document_name, d.category, d.file_name, d.keywords ?? ""].some((v) => v.toLowerCase().includes(s)));
+    return docs.filter((d) => [d.document_name, d.file_name, d.registration_number ?? ""].some((v) => v.toLowerCase().includes(s)));
   }, [docs, filter]);
 
   const memberName = (id: string) => members.find((m) => m.id === id)?.name ?? "—";
@@ -88,15 +89,32 @@ function AdminPage() {
     );
   }
 
+  const refreshAll = () => {
+    refetch();
+    membersQ.refetch();
+    qc.invalidateQueries({ queryKey: ["documents-all"] });
+    qc.invalidateQueries({ queryKey: ["member"] });
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
           <h1 className="text-3xl font-extrabold">Admin Dashboard</h1>
-          <p className="text-sm text-muted-foreground">Upload and manage family certificates.</p>
+          <p className="text-sm text-muted-foreground">Upload documents and set access passwords per family member.</p>
         </div>
-        <UploadDialog members={members} onDone={() => { refetch(); qc.invalidateQueries({ queryKey: ["documents-all"] }); }} />
+        <UploadDialog members={members} onDone={refreshAll} />
       </div>
+
+      <Card className="glass rounded-3xl border-0 p-4 md:p-6">
+        <h2 className="mb-3 text-lg font-bold">Member access passwords</h2>
+        <p className="mb-4 text-sm text-muted-foreground">Set a password to protect a member's documents. Leave blank and save to remove the password (open access).</p>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {members.map((m) => (
+            <MemberPasswordCard key={m.id} m={m} onDone={refreshAll} />
+          ))}
+        </div>
+      </Card>
 
       <Card className="glass rounded-3xl border-0 p-4">
         <Input placeholder="Filter documents…" value={filter} onChange={(e) => setFilter(e.target.value)} className="max-w-sm rounded-full" />
@@ -109,7 +127,7 @@ function AdminPage() {
               <TableRow>
                 <TableHead>Document</TableHead>
                 <TableHead>Member</TableHead>
-                <TableHead>Category</TableHead>
+                <TableHead>Reg. No.</TableHead>
                 <TableHead>Date</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
@@ -118,7 +136,7 @@ function AdminPage() {
               {filtered.length === 0 ? (
                 <TableRow><TableCell colSpan={5} className="py-10 text-center text-muted-foreground">No documents.</TableCell></TableRow>
               ) : filtered.map((d) => (
-                <DocRow key={d.id} d={d} memberName={memberName(d.member_id)} members={members} onChanged={() => { refetch(); qc.invalidateQueries({ queryKey: ["documents-all"] }); }} />
+                <DocRow key={d.id} d={d} memberName={memberName(d.member_id)} members={members} onChanged={refreshAll} />
               ))}
             </TableBody>
           </Table>
@@ -128,6 +146,50 @@ function AdminPage() {
       <p className="text-center text-xs text-muted-foreground">
         <Link to="/" className="hover:underline">← Back to portal</Link>
       </p>
+    </div>
+  );
+}
+
+function MemberPasswordCard({ m, onDone }: { m: Member; onDone: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [pwd, setPwd] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const save = async () => {
+    setBusy(true);
+    const { error } = await supabase.rpc("set_member_password", { _member_id: m.id, _new_password: pwd });
+    setBusy(false);
+    if (error) return toast.error(error.message);
+    toast.success(pwd ? "Password updated" : "Password removed");
+    setPwd(""); setOpen(false); onDone();
+  };
+
+  return (
+    <div className="flex items-center justify-between rounded-2xl border border-border/40 bg-background/40 p-3">
+      <div>
+        <div className="font-medium">{m.name}</div>
+        <div className="flex items-center gap-1 text-xs text-muted-foreground">
+          {m.password_hash ? <><Lock className="h-3 w-3" /> Protected</> : <><Unlock className="h-3 w-3" /> Open</>}
+        </div>
+      </div>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogTrigger asChild>
+          <Button size="sm" variant="outline" className="rounded-full"><KeyRound className="mr-1 h-3.5 w-3.5" /> Set password</Button>
+        </DialogTrigger>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>Password for {m.name}</DialogTitle></DialogHeader>
+          <div className="grid gap-2">
+            <Label htmlFor={`pw-${m.id}`}>New password</Label>
+            <Input id={`pw-${m.id}`} type="text" value={pwd} onChange={(e) => setPwd(e.target.value)} placeholder="Leave blank to remove password" />
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
+            <Button onClick={save} disabled={busy} className="gradient-primary border-0">
+              {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -150,8 +212,8 @@ function DocRow({ d, memberName, members, onChanged }: { d: Doc; memberName: str
     <TableRow>
       <TableCell><div className="font-medium">{d.document_name}</div><div className="text-xs text-muted-foreground">{d.file_name}</div></TableCell>
       <TableCell>{memberName}</TableCell>
-      <TableCell><span className={`rounded-full border px-2.5 py-0.5 text-xs ${categoryBadgeClass(d.category)}`}>{d.category}</span></TableCell>
-      <TableCell className="text-sm text-muted-foreground">{new Date(d.upload_date).toLocaleDateString()}</TableCell>
+      <TableCell className="text-sm">{d.registration_number || <span className="text-muted-foreground">—</span>}</TableCell>
+      <TableCell className="text-sm text-muted-foreground">{d.document_date ? new Date(d.document_date).toLocaleDateString() : "—"}</TableCell>
       <TableCell className="text-right">
         <Button size="icon" variant="ghost" className="rounded-full" onClick={view}><Eye className="h-4 w-4" /></Button>
         <Button size="icon" variant="ghost" className="rounded-full" onClick={dl}><Download className="h-4 w-4" /></Button>
@@ -165,7 +227,7 @@ function DocRow({ d, memberName, members, onChanged }: { d: Doc; memberName: str
 
 function UploadDialog({ members, onDone }: { members: Member[]; onDone: () => void }) {
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({ member_id: "", document_name: "" });
+  const [form, setForm] = useState({ member_id: "", document_name: "", registration_number: "", document_date: "" });
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -182,6 +244,8 @@ function UploadDialog({ members, onDone }: { members: Member[]; onDone: () => vo
         member_id: form.member_id,
         document_name: form.document_name,
         category: "Other",
+        registration_number: form.registration_number || null,
+        document_date: form.document_date || null,
         upload_date: new Date().toISOString().slice(0, 10),
         file_path: path,
         file_name: file.name,
@@ -190,7 +254,7 @@ function UploadDialog({ members, onDone }: { members: Member[]; onDone: () => vo
       if (ins.error) throw ins.error;
       toast.success("Uploaded");
       setOpen(false); setFile(null);
-      setForm({ member_id: "", document_name: "" });
+      setForm({ member_id: "", document_name: "", registration_number: "", document_date: "" });
       onDone();
     } catch (e: any) { toast.error(e.message ?? "Upload failed"); }
     finally { setBusy(false); }
@@ -211,9 +275,12 @@ function UploadDialog({ members, onDone }: { members: Member[]; onDone: () => vo
             </Select>
           </Field>
           <Field label="Document Name"><Input value={form.document_name} onChange={(e) => setForm({ ...form, document_name: e.target.value })} placeholder="e.g. Passport, Aadhaar, Photo" /></Field>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="Registration Number"><Input value={form.registration_number} onChange={(e) => setForm({ ...form, registration_number: e.target.value })} placeholder="e.g. A1234567" /></Field>
+            <Field label="Document Date"><Input type="date" value={form.document_date} onChange={(e) => setForm({ ...form, document_date: e.target.value })} /></Field>
+          </div>
           <Field label="File (PDF or Photo)"><Input type="file" accept="application/pdf,image/*" onChange={(e) => setFile(e.target.files?.[0] ?? null)} /></Field>
         </div>
-
         <DialogFooter>
           <Button variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
           <Button onClick={submit} disabled={busy} className="gradient-primary border-0">
@@ -226,17 +293,22 @@ function UploadDialog({ members, onDone }: { members: Member[]; onDone: () => vo
 }
 
 function EditDialog({ d, members, onClose, onDone }: { d: Doc; members: Member[]; onClose: () => void; onDone: () => void }) {
-  const [form, setForm] = useState({ ...d });
+  const [form, setForm] = useState({
+    member_id: d.member_id,
+    document_name: d.document_name,
+    registration_number: d.registration_number ?? "",
+    document_date: d.document_date ?? "",
+  });
   const [replace, setReplace] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
 
   const save = async () => {
     setBusy(true);
     try {
-      let file_path = form.file_path, file_name = form.file_name;
+      let file_path = d.file_path, file_name = d.file_name;
       if (replace) {
         const path = `${form.member_id}/${Date.now()}-${replace.name.replace(/[^\w.\-]+/g, "_")}`;
-        const up = await supabase.storage.from("documents").upload(path, replace, { contentType: replace.type || "application/pdf" });
+        const up = await supabase.storage.from("documents").upload(path, replace, { contentType: replace.type || "application/octet-stream" });
         if (up.error) throw up.error;
         await supabase.storage.from("documents").remove([d.file_path]);
         file_path = path; file_name = replace.name;
@@ -244,10 +316,8 @@ function EditDialog({ d, members, onClose, onDone }: { d: Doc; members: Member[]
       const { error } = await supabase.from("documents").update({
         member_id: form.member_id,
         document_name: form.document_name,
-        category: form.category,
-        description: form.description,
-        keywords: form.keywords,
-        upload_date: form.upload_date,
+        registration_number: form.registration_number || null,
+        document_date: form.document_date || null,
         file_path, file_name,
       }).eq("id", d.id);
       if (error) throw error;
@@ -268,10 +338,13 @@ function EditDialog({ d, members, onClose, onDone }: { d: Doc; members: Member[]
             </Select>
           </Field>
           <Field label="Document Name"><Input value={form.document_name} onChange={(e) => setForm({ ...form, document_name: e.target.value })} /></Field>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="Registration Number"><Input value={form.registration_number} onChange={(e) => setForm({ ...form, registration_number: e.target.value })} /></Field>
+            <Field label="Document Date"><Input type="date" value={form.document_date} onChange={(e) => setForm({ ...form, document_date: e.target.value })} /></Field>
+          </div>
           <Field label={`Replace file (current: ${d.file_name})`}>
             <Input type="file" accept="application/pdf,image/*" onChange={(e) => setReplace(e.target.files?.[0] ?? null)} />
           </Field>
-
         </div>
         <DialogFooter>
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
