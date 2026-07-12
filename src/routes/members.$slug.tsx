@@ -1,27 +1,25 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Download, Eye, Search, ArrowLeft, FileText } from "lucide-react";
-import { CATEGORIES, categoryBadgeClass } from "@/lib/categories";
+import { Download, Eye, Search, ArrowLeft, FileText, Lock, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/members/$slug")({
   component: MemberPage,
 });
 
-interface Member { id: string; name: string; slug: string; }
+interface Member { id: string; name: string; slug: string; password_hash: string | null; }
 interface Doc {
   id: string;
   document_name: string;
-  category: string;
-  description: string | null;
-  keywords: string | null;
+  registration_number: string | null;
+  document_date: string | null;
   file_path: string;
   file_name: string;
   upload_date: string;
@@ -36,26 +34,40 @@ async function signedUrl(path: string) {
 function MemberPage() {
   const { slug } = Route.useParams();
   const [q, setQ] = useState("");
-  const [cat, setCat] = useState<string>("all");
+  const [unlocked, setUnlocked] = useState(false);
+  const [pwd, setPwd] = useState("");
+  const [checking, setChecking] = useState(false);
 
   const memberQ = useQuery({
     queryKey: ["member", slug],
     queryFn: async () => {
-      const { data, error } = await supabase.from("family_members").select("*").eq("slug", slug).maybeSingle();
+      const { data, error } = await supabase
+        .from("family_members")
+        .select("id,name,slug,password_hash")
+        .eq("slug", slug)
+        .maybeSingle();
       if (error) throw error;
       return data as Member | null;
     },
   });
 
+  const hasPassword = !!memberQ.data?.password_hash;
+
+  useEffect(() => {
+    if (!memberQ.data) return;
+    if (!hasPassword) { setUnlocked(true); return; }
+    if (sessionStorage.getItem(`member-unlock:${slug}`) === "1") setUnlocked(true);
+  }, [memberQ.data, hasPassword, slug]);
+
   const docsQ = useQuery({
     queryKey: ["docs", memberQ.data?.id],
-    enabled: !!memberQ.data?.id,
+    enabled: !!memberQ.data?.id && unlocked,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("documents")
-        .select("*")
+        .select("id,document_name,registration_number,document_date,file_path,file_name,upload_date")
         .eq("member_id", memberQ.data!.id)
-        .order("upload_date", { ascending: false });
+        .order("document_date", { ascending: false, nullsFirst: false });
       if (error) throw error;
       return data as Doc[];
     },
@@ -64,42 +76,79 @@ function MemberPage() {
   const filtered = useMemo(() => {
     const list = docsQ.data ?? [];
     const s = q.trim().toLowerCase();
-    return list.filter((d) => {
-      if (cat !== "all" && d.category !== cat) return false;
-      if (!s) return true;
-      return (
-        d.document_name.toLowerCase().includes(s) ||
-        d.category.toLowerCase().includes(s) ||
-        d.file_name.toLowerCase().includes(s) ||
-        (d.keywords ?? "").toLowerCase().includes(s) ||
-        (d.description ?? "").toLowerCase().includes(s)
-      );
-    });
-  }, [docsQ.data, q, cat]);
+    if (!s) return list;
+    return list.filter((d) =>
+      d.document_name.toLowerCase().includes(s) ||
+      (d.registration_number ?? "").toLowerCase().includes(s) ||
+      d.file_name.toLowerCase().includes(s)
+    );
+  }, [docsQ.data, q]);
 
   const handleView = async (d: Doc) => {
-    try {
-      const url = await signedUrl(d.file_path);
-      window.open(url, "_blank");
-    } catch (e) { toast.error("Unable to open file"); }
+    try { window.open(await signedUrl(d.file_path), "_blank"); } catch { toast.error("Unable to open"); }
   };
-
   const handleDownload = async (d: Doc) => {
     try {
       const url = await signedUrl(d.file_path);
       const a = document.createElement("a");
-      a.href = url;
-      a.download = d.file_name;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
+      a.href = url; a.download = d.file_name;
+      document.body.appendChild(a); a.click(); a.remove();
     } catch { toast.error("Unable to download"); }
+  };
+
+  const submitPassword = async () => {
+    if (!pwd) return;
+    setChecking(true);
+    const { data, error } = await supabase.rpc("verify_member_password", { _slug: slug, _password: pwd });
+    setChecking(false);
+    if (error) return toast.error(error.message);
+    if (data === true) {
+      sessionStorage.setItem(`member-unlock:${slug}`, "1");
+      setUnlocked(true);
+      setPwd("");
+    } else {
+      toast.error("Incorrect password");
+    }
   };
 
   if (memberQ.isLoading) return <div className="p-8 text-center text-muted-foreground">Loading…</div>;
   if (!memberQ.data) return <div className="p-8 text-center">Member not found.</div>;
 
   const m = memberQ.data;
+
+  if (!unlocked) {
+    return (
+      <div className="mx-auto max-w-md space-y-4">
+        <Link to="/" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+          <ArrowLeft className="h-4 w-4" /> Back to Home
+        </Link>
+        <Card className="glass rounded-3xl border-0 p-8 text-center">
+          <div className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-2xl gradient-primary">
+            <Lock className="h-6 w-6" />
+          </div>
+          <h1 className="text-xl font-bold">{m.name}</h1>
+          <p className="mt-1 text-sm text-muted-foreground">Enter the password set by the admin to view this member's documents.</p>
+          <div className="mt-5 space-y-3 text-left">
+            <div>
+              <Label htmlFor="mp">Password</Label>
+              <Input
+                id="mp"
+                type="password"
+                value={pwd}
+                onChange={(e) => setPwd(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && submitPassword()}
+                className="rounded-xl"
+                autoFocus
+              />
+            </div>
+            <Button onClick={submitPassword} disabled={checking} className="w-full rounded-full gradient-primary border-0">
+              {checking && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Unlock
+            </Button>
+          </div>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -112,26 +161,17 @@ function MemberPage() {
           <div>
             <h1 className="text-3xl font-extrabold tracking-tight">{m.name} — Documents</h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              {filtered.length} of {docsQ.data?.length ?? 0} certificate{(docsQ.data?.length ?? 0) === 1 ? "" : "s"}
+              {filtered.length} of {docsQ.data?.length ?? 0} document{(docsQ.data?.length ?? 0) === 1 ? "" : "s"}
             </p>
           </div>
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                placeholder="Search documents…"
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                className="w-full rounded-full pl-9 sm:w-72"
-              />
-            </div>
-            <Select value={cat} onValueChange={setCat}>
-              <SelectTrigger className="rounded-full sm:w-44"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All categories</SelectItem>
-                {CATEGORIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-              </SelectContent>
-            </Select>
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder="Search by name or reg. no…"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              className="w-full rounded-full pl-9 sm:w-80"
+            />
           </div>
         </div>
       </Card>
@@ -143,30 +183,27 @@ function MemberPage() {
               <TableRow>
                 <TableHead className="w-12">Sr.</TableHead>
                 <TableHead>Document Name</TableHead>
-                <TableHead>Category</TableHead>
-                <TableHead>Upload Date</TableHead>
+                <TableHead>Registration No.</TableHead>
+                <TableHead>Date</TableHead>
                 <TableHead>File</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filtered.length === 0 ? (
+              {docsQ.isLoading ? (
+                <TableRow><TableCell colSpan={6} className="py-10 text-center text-muted-foreground">Loading…</TableCell></TableRow>
+              ) : filtered.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="py-10 text-center text-muted-foreground">
-                    No documents found.
-                  </TableCell>
+                  <TableCell colSpan={6} className="py-10 text-center text-muted-foreground">No documents found.</TableCell>
                 </TableRow>
               ) : filtered.map((d, i) => (
                 <TableRow key={d.id} className="hover:bg-accent/50">
                   <TableCell className="text-muted-foreground">{i + 1}</TableCell>
-                  <TableCell>
-                    <div className="font-medium">{d.document_name}</div>
-                    {d.description && <div className="text-xs text-muted-foreground">{d.description}</div>}
+                  <TableCell className="font-medium">{d.document_name}</TableCell>
+                  <TableCell className="text-sm">{d.registration_number || <span className="text-muted-foreground">—</span>}</TableCell>
+                  <TableCell className="text-sm text-muted-foreground">
+                    {d.document_date ? new Date(d.document_date).toLocaleDateString() : "—"}
                   </TableCell>
-                  <TableCell>
-                    <span className={`rounded-full border px-2.5 py-0.5 text-xs font-medium ${categoryBadgeClass(d.category)}`}>{d.category}</span>
-                  </TableCell>
-                  <TableCell className="text-sm text-muted-foreground">{new Date(d.upload_date).toLocaleDateString()}</TableCell>
                   <TableCell>
                     <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                       <FileText className="h-3.5 w-3.5" /> <span className="max-w-[16ch] truncate">{d.file_name}</span>
