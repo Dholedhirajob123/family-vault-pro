@@ -23,7 +23,6 @@ export function Nav() {
           <NavItem to="/" icon={<Home className="h-4 w-4" />} label="Home" />
           <NavItem to="/members" icon={<Users className="h-4 w-4" />} label="Members" />
           <NavItem to="/search" icon={<Search className="h-4 w-4" />} label="Search" />
-          <NavItem to="/categories" icon={<Tag className="h-4 w-4" />} label="Categories" />
           {isAdmin && <NavItem to="/admin" icon={<ShieldCheck className="h-4 w-4" />} label="Admin" />}
         </nav>
 
