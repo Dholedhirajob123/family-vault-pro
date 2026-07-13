@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
-import { useEffect, useMemo, useState, useRef } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
@@ -16,11 +16,10 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { 
   Upload, Trash2, Pencil, Eye, Download, Loader2, KeyRound, 
-  Lock, Unlock, Plus, MoreVertical, Image, FileText, X, Camera, Scan 
+  Lock, Unlock, Plus, MoreVertical, Image, FileText, X
 } from "lucide-react";
 
 export const Route = createFileRoute("/admin")({
@@ -333,61 +332,6 @@ function UploadDialog({ members, onDone }: { members: Member[]; onDone: () => vo
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [preview, setPreview] = useState<string | null>(null);
-  const [uploadMethod, setUploadMethod] = useState<"file" | "camera">("file");
-  const [scanning, setScanning] = useState(false);
-  
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [stream, setStream] = useState<MediaStream | null>(null);
-  const [cameraActive, setCameraActive] = useState(false);
-
-  // Camera functions
-  const startCamera = async () => {
-    try {
-      const mediaStream = await navigator.mediaDevices.getUserMedia({ 
-        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } } 
-      });
-      setStream(mediaStream);
-      if (videoRef.current) {
-        videoRef.current.srcObject = mediaStream;
-        videoRef.current.play();
-        setCameraActive(true);
-      }
-    } catch (error) {
-      toast.error("Unable to access camera. Please check permissions.");
-    }
-  };
-
-  const stopCamera = () => {
-    if (stream) {
-      stream.getTracks().forEach(track => track.stop());
-      setStream(null);
-      setCameraActive(false);
-    }
-  };
-
-  const capturePhoto = () => {
-    if (videoRef.current && canvasRef.current) {
-      const video = videoRef.current;
-      const canvas = canvasRef.current;
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        canvas.toBlob((blob) => {
-          if (blob) {
-            const photoFile = new File([blob], `capture-${Date.now()}.jpg`, { type: 'image/jpeg' });
-            setFile(photoFile);
-            setPreview(URL.createObjectURL(blob));
-            stopCamera();
-            setScanning(false);
-            toast.success("Photo captured successfully!");
-          }
-        }, 'image/jpeg', 0.95);
-      }
-    }
-  };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0] ?? null;
@@ -407,13 +351,10 @@ function UploadDialog({ members, onDone }: { members: Member[]; onDone: () => vo
   const clearFile = () => {
     setFile(null);
     setPreview(null);
-    stopCamera();
-    setCameraActive(false);
-    setScanning(false);
   };
 
   const submit = async () => {
-    if (!file) return toast.error("Select a file or capture a photo");
+    if (!file) return toast.error("Select a PDF or image");
     if (!form.member_id || !form.document_name) return toast.error("Fill required fields");
     
     // Validate file type
@@ -449,8 +390,6 @@ function UploadDialog({ members, onDone }: { members: Member[]; onDone: () => vo
       setFile(null);
       setPreview(null);
       setForm({ member_id: "", document_name: "", registration_number: "", document_date: "" });
-      stopCamera();
-      setCameraActive(false);
       onDone();
     } catch (e: any) { 
       toast.error(e.message ?? "Upload failed"); 
@@ -460,203 +399,84 @@ function UploadDialog({ members, onDone }: { members: Member[]; onDone: () => vo
 
   const isImage = file?.type?.startsWith('image/');
 
-  // Cleanup on dialog close
-  useEffect(() => {
-    if (!open) {
-      stopCamera();
-      setCameraActive(false);
-      setScanning(false);
-      setFile(null);
-      setPreview(null);
-    }
-    return () => stopCamera();
-  }, [open]);
-
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button className="rounded-full gradient-primary border-0"><Upload className="mr-2 h-4 w-4" /> Upload</Button>
       </DialogTrigger>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader><DialogTitle>Upload Document or Image</DialogTitle></DialogHeader>
-        
-        <Tabs value={uploadMethod} onValueChange={(v) => setUploadMethod(v as "file" | "camera")}>
-          <TabsList className="grid w-full grid-cols-2 rounded-full">
-            <TabsTrigger value="file" className="rounded-full">
-              <Upload className="mr-2 h-4 w-4" /> File Upload
-            </TabsTrigger>
-            <TabsTrigger value="camera" className="rounded-full">
-              <Camera className="mr-2 h-4 w-4" /> Camera / Scan
-            </TabsTrigger>
-          </TabsList>
-          
-          <TabsContent value="file" className="space-y-3 pt-4">
-            <div className="grid gap-3">
-              <Field label="Family Member">
-                <Select value={form.member_id} onValueChange={(v) => setForm({ ...form, member_id: v })}>
-                  <SelectTrigger><SelectValue placeholder="Select member" /></SelectTrigger>
-                  <SelectContent>
-                    {members.map((m) => <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>)}
-                    <SelectItem value="other">Other</SelectItem>
-                  </SelectContent>
-                </Select>
-              </Field>
-              <Field label="Document Name">
-                <Input 
-                  value={form.document_name} 
-                  onChange={(e) => setForm({ ...form, document_name: e.target.value })} 
-                  placeholder="e.g. Passport, Aadhaar, Photo" 
-                />
-              </Field>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <Field label="Registration Number">
-                  <Input 
-                    value={form.registration_number} 
-                    onChange={(e) => setForm({ ...form, registration_number: e.target.value })} 
-                    placeholder="e.g. A1234567" 
-                  />
-                </Field>
-                <Field label="Document Date">
-                  <Input 
-                    type="date" 
-                    value={form.document_date} 
-                    onChange={(e) => setForm({ ...form, document_date: e.target.value })} 
-                  />
-                </Field>
-              </div>
-              <Field label="File (PDF or Image)">
-                <div className="flex items-center gap-2">
-                  <Input 
-                    type="file" 
-                    accept="application/pdf,image/*" 
-                    onChange={handleFileChange}
-                    className="flex-1"
-                  />
-                  {file && (
-                    <Button 
-                      variant="ghost" 
-                      size="icon" 
-                      className="h-10 w-10 shrink-0 rounded-full"
-                      onClick={clearFile}
-                    >
-                      <X className="h-4 w-4" />
-                    </Button>
-                  )}
-                </div>
-                {file && (
-                  <div className="mt-2">
-                    <p className="text-xs text-muted-foreground">
-                      {file.name} ({(file.size / 1024).toFixed(1)} KB) - {file.type.startsWith('image/') ? '🖼️ Image' : '📄 PDF'}
-                    </p>
-                    {isImage && preview && (
-                      <div className="mt-2 rounded-lg border overflow-hidden">
-                        <img src={preview} alt="Preview" className="max-h-48 w-full object-contain" />
-                      </div>
-                    )}
+      <DialogContent className="max-w-lg">
+        <DialogHeader><DialogTitle>Upload Document</DialogTitle></DialogHeader>
+        <div className="grid gap-3">
+          <Field label="Family Member">
+            <Select value={form.member_id} onValueChange={(v) => setForm({ ...form, member_id: v })}>
+              <SelectTrigger><SelectValue placeholder="Select member" /></SelectTrigger>
+              <SelectContent>
+                {members.map((m) => <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>)}
+                <SelectItem value="other">Other</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field label="Document Name">
+            <Input 
+              value={form.document_name} 
+              onChange={(e) => setForm({ ...form, document_name: e.target.value })} 
+              placeholder="e.g. Passport, Aadhaar, Photo" 
+            />
+          </Field>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="Registration Number">
+              <Input 
+                value={form.registration_number} 
+                onChange={(e) => setForm({ ...form, registration_number: e.target.value })} 
+                placeholder="e.g. A1234567" 
+              />
+            </Field>
+            <Field label="Document Date">
+              <Input 
+                type="date" 
+                value={form.document_date} 
+                onChange={(e) => setForm({ ...form, document_date: e.target.value })} 
+              />
+            </Field>
+          </div>
+          <Field label="File (PDF or Image)">
+            <div className="flex items-center gap-2">
+              <Input 
+                type="file" 
+                accept="application/pdf,image/*" 
+                onChange={handleFileChange}
+                className="flex-1"
+              />
+              {file && (
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  className="h-10 w-10 shrink-0 rounded-full"
+                  onClick={clearFile}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
+            {file && (
+              <div className="mt-2">
+                <p className="text-xs text-muted-foreground">
+                  {file.name} ({(file.size / 1024).toFixed(1)} KB) - {file.type.startsWith('image/') ? '🖼️ Image' : '📄 PDF'}
+                </p>
+                {isImage && preview && (
+                  <div className="mt-2 rounded-lg border overflow-hidden">
+                    <img src={preview} alt="Preview" className="max-h-48 w-full object-contain" />
                   </div>
                 )}
-              </Field>
-            </div>
-          </TabsContent>
-          
-          <TabsContent value="camera" className="space-y-3 pt-4">
-            <div className="grid gap-3">
-              <Field label="Family Member">
-                <Select value={form.member_id} onValueChange={(v) => setForm({ ...form, member_id: v })}>
-                  <SelectTrigger><SelectValue placeholder="Select member" /></SelectTrigger>
-                  <SelectContent>
-                    {members.map((m) => <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>)}
-                    <SelectItem value="other">Other</SelectItem>
-                  </SelectContent>
-                </Select>
-              </Field>
-              <Field label="Document Name">
-                <Input 
-                  value={form.document_name} 
-                  onChange={(e) => setForm({ ...form, document_name: e.target.value })} 
-                  placeholder="e.g. Passport, Photo, Document" 
-                />
-              </Field>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <Field label="Registration Number">
-                  <Input 
-                    value={form.registration_number} 
-                    onChange={(e) => setForm({ ...form, registration_number: e.target.value })} 
-                    placeholder="e.g. A1234567" 
-                  />
-                </Field>
-                <Field label="Document Date">
-                  <Input 
-                    type="date" 
-                    value={form.document_date} 
-                    onChange={(e) => setForm({ ...form, document_date: e.target.value })} 
-                  />
-                </Field>
               </div>
-              
-              <Field label="Capture Photo">
-                <div className="space-y-3">
-                  {!cameraActive && !preview && (
-                    <div className="flex gap-2">
-                      <Button onClick={startCamera} className="flex-1">
-                        <Camera className="mr-2 h-4 w-4" /> Open Camera
-                      </Button>
-                    </div>
-                  )}
-                  
-                  {cameraActive && (
-                    <div className="space-y-3">
-                      <div className="relative rounded-lg overflow-hidden bg-black">
-                        <video 
-                          ref={videoRef} 
-                          className="w-full max-h-[400px] object-contain"
-                          autoPlay
-                          playsInline
-                        />
-                        <canvas ref={canvasRef} className="hidden" />
-                      </div>
-                      <div className="flex gap-2">
-                        <Button onClick={capturePhoto} className="flex-1">
-                          <Camera className="mr-2 h-4 w-4" /> Capture Photo
-                        </Button>
-                        <Button variant="ghost" onClick={stopCamera}>
-                          <X className="h-4 w-4" /> Cancel
-                        </Button>
-                      </div>
-                      <p className="text-xs text-muted-foreground text-center">
-                        Tap "Capture Photo" to take a picture of the document
-                      </p>
-                    </div>
-                  )}
-                  
-                  {preview && !cameraActive && (
-                    <div className="space-y-3">
-                      <div className="rounded-lg border overflow-hidden">
-                        <img src={preview} alt="Captured" className="max-h-64 w-full object-contain" />
-                      </div>
-                      <div className="flex gap-2">
-                        <Button onClick={() => { setPreview(null); setFile(null); startCamera(); }} variant="outline" className="flex-1">
-                          <Camera className="mr-2 h-4 w-4" /> Retake
-                        </Button>
-                        <Button onClick={clearFile} variant="ghost">
-                          <X className="h-4 w-4" /> Remove
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </Field>
-            </div>
-          </TabsContent>
-        </Tabs>
-        
+            )}
+          </Field>
+        </div>
         <DialogFooter>
           <Button variant="ghost" onClick={() => {
             setOpen(false);
             setFile(null);
             setPreview(null);
-            stopCamera();
-            setCameraActive(false);
           }}>Cancel</Button>
           <Button onClick={submit} disabled={busy || !file} className="gradient-primary border-0">
             {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} 
