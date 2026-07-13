@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
@@ -10,8 +10,18 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
-import { Upload, Trash2, Pencil, Eye, Download, Loader2, KeyRound, Lock, Unlock, Plus } from "lucide-react";
+import { 
+  Upload, Trash2, Pencil, Eye, Download, Loader2, KeyRound, 
+  Lock, Unlock, Plus, MoreVertical, Image, FileText, X, Camera, Scan 
+} from "lucide-react";
 
 export const Route = createFileRoute("/admin")({
   component: AdminPage,
@@ -79,21 +89,11 @@ function AdminPage() {
           <h1 className="text-3xl font-extrabold">Admin Dashboard</h1>
           <p className="text-sm text-muted-foreground">Upload documents and set access passwords per family member.</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <AddMemberDialog onDone={refreshAll} />
           <UploadDialog members={members} onDone={refreshAll} />
         </div>
       </div>
-
-      <Card className="glass rounded-3xl border-0 p-4 md:p-6">
-        <h2 className="mb-3 text-lg font-bold">Member access passwords</h2>
-        <p className="mb-4 text-sm text-muted-foreground">Set a password to protect a member's documents. Leave blank and save to remove the password (open access).</p>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {members.map((m) => (
-            <MemberPasswordCard key={m.id} m={m} onDone={refreshAll} />
-          ))}
-        </div>
-      </Card>
 
       <Card className="glass rounded-3xl border-0 p-4">
         <Input placeholder="Filter documents…" value={filter} onChange={(e) => setFilter(e.target.value)} className="max-w-sm rounded-full" />
@@ -105,15 +105,16 @@ function AdminPage() {
             <TableHeader>
               <TableRow>
                 <TableHead>Document</TableHead>
-                <TableHead>Member</TableHead>
-                <TableHead>Reg. No.</TableHead>
-                <TableHead>Date</TableHead>
+                <TableHead className="hidden sm:table-cell">Member</TableHead>
+                <TableHead className="hidden md:table-cell">Reg. No.</TableHead>
+                <TableHead className="hidden md:table-cell">Date</TableHead>
+                <TableHead className="hidden md:table-cell">Type</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {filtered.length === 0 ? (
-                <TableRow><TableCell colSpan={5} className="py-10 text-center text-muted-foreground">No documents.</TableCell></TableRow>
+                <TableRow><TableCell colSpan={6} className="py-10 text-center text-muted-foreground">No documents.</TableCell></TableRow>
               ) : filtered.map((d) => (
                 <DocRow key={d.id} d={d} memberName={memberName(d.member_id)} members={members} onChanged={refreshAll} />
               ))}
@@ -158,14 +159,12 @@ function MemberPasswordCard({ m, onDone }: { m: Member; onDone: () => void }) {
   const deleteMember = async () => {
     if (!confirm(`Delete "${m.name}" and all their documents? This cannot be undone.`)) return;
     try {
-      // Delete all documents for this member
       const { data: memberDocs } = await supabase.from("documents").select("file_path").eq("member_id", m.id);
       if (memberDocs && memberDocs.length > 0) {
         const filePaths = memberDocs.map((d: any) => d.file_path);
         await supabase.storage.from("documents").remove(filePaths);
         await supabase.from("documents").delete().eq("member_id", m.id);
       }
-      // Delete member
       const { error } = await supabase.from("family_members").delete().eq("id", m.id);
       if (error) throw error;
       toast.success("Member deleted");
@@ -186,7 +185,7 @@ function MemberPasswordCard({ m, onDone }: { m: Member; onDone: () => void }) {
       <div className="flex gap-1">
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>
-            <Button size="sm" variant="outline" className="rounded-full"><KeyRound className="mr-1 h-3.5 w-3.5" /> Set password</Button>
+            <Button size="sm" variant="outline" className="rounded-full"><KeyRound className="mr-1 h-3.5 w-3.5" /> Set / Reset</Button>
           </DialogTrigger>
           <DialogContent className="max-w-sm">
             <DialogHeader><DialogTitle>Password for {m.name}</DialogTitle></DialogHeader>
@@ -220,31 +219,109 @@ function MemberPasswordCard({ m, onDone }: { m: Member; onDone: () => void }) {
 }
 
 function DocRow({ d, memberName, members, onChanged }: { d: Doc; memberName: string; members: Member[]; onChanged: () => void }) {
-  const [open, setOpen] = useState(false);
-  const view = async () => { try { window.open(await signedUrl(d.file_path), "_blank"); } catch { toast.error("Failed"); } };
-  const dl = async () => {
-    try { const a = document.createElement("a"); a.href = await signedUrl(d.file_path); a.download = d.file_name; document.body.appendChild(a); a.click(); a.remove(); } catch { toast.error("Failed"); }
+  const [editOpen, setEditOpen] = useState(false);
+  
+  const view = async () => { 
+    try { 
+      window.open(await signedUrl(d.file_path), "_blank"); 
+    } catch { 
+      toast.error("Failed to open document"); 
+    } 
   };
+  
+  const dl = async () => {
+    try { 
+      const a = document.createElement("a"); 
+      a.href = await signedUrl(d.file_path); 
+      a.download = d.file_name; 
+      document.body.appendChild(a); 
+      a.click(); 
+      a.remove(); 
+      toast.success("Download started");
+    } catch { 
+      toast.error("Failed to download"); 
+    }
+  };
+  
   const del = async () => {
     if (!confirm(`Delete "${d.document_name}"? This cannot be undone.`)) return;
-    await supabase.storage.from("documents").remove([d.file_path]);
-    const { error } = await supabase.from("documents").delete().eq("id", d.id);
-    if (error) return toast.error(error.message);
-    toast.success("Deleted"); onChanged();
+    try {
+      await supabase.storage.from("documents").remove([d.file_path]);
+      const { error } = await supabase.from("documents").delete().eq("id", d.id);
+      if (error) throw error;
+      toast.success("Document deleted"); 
+      onChanged();
+    } catch (e: any) {
+      toast.error(e.message ?? "Failed to delete");
+    }
   };
+
+  // Check file type
+  const getFileType = (fileName: string) => {
+    const ext = fileName.split('.').pop()?.toLowerCase();
+    if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'].includes(ext || '')) {
+      return { type: 'image', icon: Image, label: 'Image' };
+    }
+    if (['pdf'].includes(ext || '')) {
+      return { type: 'pdf', icon: FileText, label: 'PDF' };
+    }
+    return { type: 'other', icon: FileText, label: 'Document' };
+  };
+
+  const fileInfo = getFileType(d.file_name);
+  const FileIcon = fileInfo.icon;
 
   return (
     <TableRow>
-      <TableCell><div className="font-medium">{d.document_name}</div><div className="text-xs text-muted-foreground">{d.file_name}</div></TableCell>
-      <TableCell>{memberName}</TableCell>
-      <TableCell className="text-sm">{d.registration_number || <span className="text-muted-foreground">—</span>}</TableCell>
-      <TableCell className="text-sm text-muted-foreground">{d.document_date ? new Date(d.document_date).toLocaleDateString() : "—"}</TableCell>
+      <TableCell>
+        <div className="flex items-center gap-2">
+          <FileIcon className="h-4 w-4 text-muted-foreground" />
+          <div>
+            <div className="font-medium">{d.document_name}</div>
+            <div className="text-xs text-muted-foreground">{d.file_name}</div>
+          </div>
+        </div>
+      </TableCell>
+      <TableCell className="hidden sm:table-cell">{memberName}</TableCell>
+      <TableCell className="hidden md:table-cell text-sm">
+        {d.registration_number || <span className="text-muted-foreground">—</span>}
+      </TableCell>
+      <TableCell className="hidden md:table-cell text-sm text-muted-foreground">
+        {d.document_date ? new Date(d.document_date).toLocaleDateString() : "—"}
+      </TableCell>
+      <TableCell className="hidden md:table-cell">
+        <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs ${
+          fileInfo.type === 'image' 
+            ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400' 
+            : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
+        }`}>
+          <FileIcon className="h-3 w-3" />
+          {fileInfo.label}
+        </span>
+      </TableCell>
       <TableCell className="text-right">
-        <Button size="icon" variant="ghost" className="rounded-full" onClick={view}><Eye className="h-4 w-4" /></Button>
-        <Button size="icon" variant="ghost" className="rounded-full" onClick={dl}><Download className="h-4 w-4" /></Button>
-        <Button size="icon" variant="ghost" className="rounded-full" onClick={() => setOpen(true)}><Pencil className="h-4 w-4" /></Button>
-        <Button size="icon" variant="ghost" className="rounded-full text-destructive" onClick={del}><Trash2 className="h-4 w-4" /></Button>
-        {open && <EditDialog d={d} members={members} onClose={() => setOpen(false)} onDone={onChanged} />}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button size="sm" variant="ghost" className="rounded-full h-8 w-8 p-0">
+              <MoreVertical className="h-4 w-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-48">
+            <DropdownMenuItem onClick={view} className="cursor-pointer">
+              <Eye className="mr-2 h-4 w-4" /> View Document
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={dl} className="cursor-pointer">
+              <Download className="mr-2 h-4 w-4" /> Download
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setEditOpen(true)} className="cursor-pointer">
+              <Pencil className="mr-2 h-4 w-4" /> Edit
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={del} className="cursor-pointer text-destructive focus:text-destructive">
+              <Trash2 className="mr-2 h-4 w-4" /> Delete
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        {editOpen && <EditDialog d={d} members={members} onClose={() => setEditOpen(false)} onDone={onChanged} />}
       </TableCell>
     </TableRow>
   );
@@ -255,64 +332,335 @@ function UploadDialog({ members, onDone }: { members: Member[]; onDone: () => vo
   const [form, setForm] = useState({ member_id: "", document_name: "", registration_number: "", document_date: "" });
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
+  const [preview, setPreview] = useState<string | null>(null);
+  const [uploadMethod, setUploadMethod] = useState<"file" | "camera">("file");
+  const [scanning, setScanning] = useState(false);
+  
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [stream, setStream] = useState<MediaStream | null>(null);
+  const [cameraActive, setCameraActive] = useState(false);
+
+  // Camera functions
+  const startCamera = async () => {
+    try {
+      const mediaStream = await navigator.mediaDevices.getUserMedia({ 
+        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } } 
+      });
+      setStream(mediaStream);
+      if (videoRef.current) {
+        videoRef.current.srcObject = mediaStream;
+        videoRef.current.play();
+        setCameraActive(true);
+      }
+    } catch (error) {
+      toast.error("Unable to access camera. Please check permissions.");
+    }
+  };
+
+  const stopCamera = () => {
+    if (stream) {
+      stream.getTracks().forEach(track => track.stop());
+      setStream(null);
+      setCameraActive(false);
+    }
+  };
+
+  const capturePhoto = () => {
+    if (videoRef.current && canvasRef.current) {
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob((blob) => {
+          if (blob) {
+            const photoFile = new File([blob], `capture-${Date.now()}.jpg`, { type: 'image/jpeg' });
+            setFile(photoFile);
+            setPreview(URL.createObjectURL(blob));
+            stopCamera();
+            setScanning(false);
+            toast.success("Photo captured successfully!");
+          }
+        }, 'image/jpeg', 0.95);
+      }
+    }
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFile = e.target.files?.[0] ?? null;
+    setFile(selectedFile);
+    
+    if (selectedFile && selectedFile.type.startsWith('image/')) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setPreview(reader.result as string);
+      };
+      reader.readAsDataURL(selectedFile);
+    } else {
+      setPreview(null);
+    }
+  };
+
+  const clearFile = () => {
+    setFile(null);
+    setPreview(null);
+    stopCamera();
+    setCameraActive(false);
+    setScanning(false);
+  };
 
   const submit = async () => {
-    if (!file) return toast.error("Select a PDF or image");
+    if (!file) return toast.error("Select a file or capture a photo");
     if (!form.member_id || !form.document_name) return toast.error("Fill required fields");
+    
+    // Validate file type
+    const validTypes = ['application/pdf', 'image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+    if (!validTypes.includes(file.type)) {
+      return toast.error("Please upload a PDF or image file (JPG, PNG, GIF, WEBP)");
+    }
+    
     setBusy(true);
     try {
       const path = `${form.member_id}/${Date.now()}-${file.name.replace(/[^\w.\-]+/g, "_")}`;
-      const up = await supabase.storage.from("documents").upload(path, file, { contentType: file.type || "application/octet-stream" });
+      const up = await supabase.storage.from("documents").upload(path, file, { 
+        contentType: file.type || "application/octet-stream" 
+      });
       if (up.error) throw up.error;
+      
       const { data: userData } = await supabase.auth.getUser();
       const ins = await supabase.from("documents").insert({
         member_id: form.member_id,
         document_name: form.document_name,
         registration_number: form.registration_number || null,
         document_date: form.document_date || null,
-        category: "Document",
+        category: file.type.startsWith('image/') ? 'Image' : 'Document',
         upload_date: new Date().toISOString().slice(0, 10),
         file_path: path,
         file_name: file.name,
         uploaded_by: userData.user?.id ?? null,
       });
       if (ins.error) throw ins.error;
-      toast.success("Uploaded");
-      setOpen(false); setFile(null);
+      
+      toast.success(`${file.type.startsWith('image/') ? 'Image' : 'Document'} uploaded successfully`);
+      setOpen(false); 
+      setFile(null);
+      setPreview(null);
       setForm({ member_id: "", document_name: "", registration_number: "", document_date: "" });
+      stopCamera();
+      setCameraActive(false);
       onDone();
-    } catch (e: any) { toast.error(e.message ?? "Upload failed"); }
+    } catch (e: any) { 
+      toast.error(e.message ?? "Upload failed"); 
+    }
     finally { setBusy(false); }
   };
+
+  const isImage = file?.type?.startsWith('image/');
+
+  // Cleanup on dialog close
+  useEffect(() => {
+    if (!open) {
+      stopCamera();
+      setCameraActive(false);
+      setScanning(false);
+      setFile(null);
+      setPreview(null);
+    }
+    return () => stopCamera();
+  }, [open]);
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button className="rounded-full gradient-primary border-0"><Upload className="mr-2 h-4 w-4" /> Upload Document</Button>
+        <Button className="rounded-full gradient-primary border-0"><Upload className="mr-2 h-4 w-4" /> Upload</Button>
       </DialogTrigger>
-      <DialogContent className="max-w-lg">
-        <DialogHeader><DialogTitle>Upload Document</DialogTitle></DialogHeader>
-        <div className="grid gap-3">
-          <Field label="Family Member">
-            <Select value={form.member_id} onValueChange={(v) => setForm({ ...form, member_id: v })}>
-              <SelectTrigger><SelectValue placeholder="Select member" /></SelectTrigger>
-              <SelectContent>
-                {members.map((m) => <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>)}
-                <SelectItem value="other">Other</SelectItem>
-              </SelectContent>
-            </Select>
-          </Field>
-          <Field label="Document Name"><Input value={form.document_name} onChange={(e) => setForm({ ...form, document_name: e.target.value })} placeholder="e.g. Passport, Aadhaar, Photo" /></Field>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Registration Number"><Input value={form.registration_number} onChange={(e) => setForm({ ...form, registration_number: e.target.value })} placeholder="e.g. A1234567" /></Field>
-            <Field label="Document Date"><Input type="date" value={form.document_date} onChange={(e) => setForm({ ...form, document_date: e.target.value })} /></Field>
-          </div>
-          <Field label="File (PDF or Photo)"><Input type="file" accept="application/pdf,image/*" onChange={(e) => setFile(e.target.files?.[0] ?? null)} /></Field>
-        </div>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader><DialogTitle>Upload Document or Image</DialogTitle></DialogHeader>
+        
+        <Tabs value={uploadMethod} onValueChange={(v) => setUploadMethod(v as "file" | "camera")}>
+          <TabsList className="grid w-full grid-cols-2 rounded-full">
+            <TabsTrigger value="file" className="rounded-full">
+              <Upload className="mr-2 h-4 w-4" /> File Upload
+            </TabsTrigger>
+            <TabsTrigger value="camera" className="rounded-full">
+              <Camera className="mr-2 h-4 w-4" /> Camera / Scan
+            </TabsTrigger>
+          </TabsList>
+          
+          <TabsContent value="file" className="space-y-3 pt-4">
+            <div className="grid gap-3">
+              <Field label="Family Member">
+                <Select value={form.member_id} onValueChange={(v) => setForm({ ...form, member_id: v })}>
+                  <SelectTrigger><SelectValue placeholder="Select member" /></SelectTrigger>
+                  <SelectContent>
+                    {members.map((m) => <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>)}
+                    <SelectItem value="other">Other</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field label="Document Name">
+                <Input 
+                  value={form.document_name} 
+                  onChange={(e) => setForm({ ...form, document_name: e.target.value })} 
+                  placeholder="e.g. Passport, Aadhaar, Photo" 
+                />
+              </Field>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Registration Number">
+                  <Input 
+                    value={form.registration_number} 
+                    onChange={(e) => setForm({ ...form, registration_number: e.target.value })} 
+                    placeholder="e.g. A1234567" 
+                  />
+                </Field>
+                <Field label="Document Date">
+                  <Input 
+                    type="date" 
+                    value={form.document_date} 
+                    onChange={(e) => setForm({ ...form, document_date: e.target.value })} 
+                  />
+                </Field>
+              </div>
+              <Field label="File (PDF or Image)">
+                <div className="flex items-center gap-2">
+                  <Input 
+                    type="file" 
+                    accept="application/pdf,image/*" 
+                    onChange={handleFileChange}
+                    className="flex-1"
+                  />
+                  {file && (
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      className="h-10 w-10 shrink-0 rounded-full"
+                      onClick={clearFile}
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
+                {file && (
+                  <div className="mt-2">
+                    <p className="text-xs text-muted-foreground">
+                      {file.name} ({(file.size / 1024).toFixed(1)} KB) - {file.type.startsWith('image/') ? '🖼️ Image' : '📄 PDF'}
+                    </p>
+                    {isImage && preview && (
+                      <div className="mt-2 rounded-lg border overflow-hidden">
+                        <img src={preview} alt="Preview" className="max-h-48 w-full object-contain" />
+                      </div>
+                    )}
+                  </div>
+                )}
+              </Field>
+            </div>
+          </TabsContent>
+          
+          <TabsContent value="camera" className="space-y-3 pt-4">
+            <div className="grid gap-3">
+              <Field label="Family Member">
+                <Select value={form.member_id} onValueChange={(v) => setForm({ ...form, member_id: v })}>
+                  <SelectTrigger><SelectValue placeholder="Select member" /></SelectTrigger>
+                  <SelectContent>
+                    {members.map((m) => <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>)}
+                    <SelectItem value="other">Other</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field label="Document Name">
+                <Input 
+                  value={form.document_name} 
+                  onChange={(e) => setForm({ ...form, document_name: e.target.value })} 
+                  placeholder="e.g. Passport, Photo, Document" 
+                />
+              </Field>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Registration Number">
+                  <Input 
+                    value={form.registration_number} 
+                    onChange={(e) => setForm({ ...form, registration_number: e.target.value })} 
+                    placeholder="e.g. A1234567" 
+                  />
+                </Field>
+                <Field label="Document Date">
+                  <Input 
+                    type="date" 
+                    value={form.document_date} 
+                    onChange={(e) => setForm({ ...form, document_date: e.target.value })} 
+                  />
+                </Field>
+              </div>
+              
+              <Field label="Capture Photo">
+                <div className="space-y-3">
+                  {!cameraActive && !preview && (
+                    <div className="flex gap-2">
+                      <Button onClick={startCamera} className="flex-1">
+                        <Camera className="mr-2 h-4 w-4" /> Open Camera
+                      </Button>
+                    </div>
+                  )}
+                  
+                  {cameraActive && (
+                    <div className="space-y-3">
+                      <div className="relative rounded-lg overflow-hidden bg-black">
+                        <video 
+                          ref={videoRef} 
+                          className="w-full max-h-[400px] object-contain"
+                          autoPlay
+                          playsInline
+                        />
+                        <canvas ref={canvasRef} className="hidden" />
+                      </div>
+                      <div className="flex gap-2">
+                        <Button onClick={capturePhoto} className="flex-1">
+                          <Camera className="mr-2 h-4 w-4" /> Capture Photo
+                        </Button>
+                        <Button variant="ghost" onClick={stopCamera}>
+                          <X className="h-4 w-4" /> Cancel
+                        </Button>
+                      </div>
+                      <p className="text-xs text-muted-foreground text-center">
+                        Tap "Capture Photo" to take a picture of the document
+                      </p>
+                    </div>
+                  )}
+                  
+                  {preview && !cameraActive && (
+                    <div className="space-y-3">
+                      <div className="rounded-lg border overflow-hidden">
+                        <img src={preview} alt="Captured" className="max-h-64 w-full object-contain" />
+                      </div>
+                      <div className="flex gap-2">
+                        <Button onClick={() => { setPreview(null); setFile(null); startCamera(); }} variant="outline" className="flex-1">
+                          <Camera className="mr-2 h-4 w-4" /> Retake
+                        </Button>
+                        <Button onClick={clearFile} variant="ghost">
+                          <X className="h-4 w-4" /> Remove
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </Field>
+            </div>
+          </TabsContent>
+        </Tabs>
+        
         <DialogFooter>
-          <Button variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
-          <Button onClick={submit} disabled={busy} className="gradient-primary border-0">
-            {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Upload
+          <Button variant="ghost" onClick={() => {
+            setOpen(false);
+            setFile(null);
+            setPreview(null);
+            stopCamera();
+            setCameraActive(false);
+          }}>Cancel</Button>
+          <Button onClick={submit} disabled={busy || !file} className="gradient-primary border-0">
+            {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} 
+            Upload {file?.type?.startsWith('image/') ? 'Image' : 'Document'}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -329,17 +677,43 @@ function EditDialog({ d, members, onClose, onDone }: { d: Doc; members: Member[]
   });
   const [replace, setReplace] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
+  const [preview, setPreview] = useState<string | null>(null);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFile = e.target.files?.[0] ?? null;
+    setReplace(selectedFile);
+    
+    if (selectedFile && selectedFile.type.startsWith('image/')) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setPreview(reader.result as string);
+      };
+      reader.readAsDataURL(selectedFile);
+    } else {
+      setPreview(null);
+    }
+  };
 
   const save = async () => {
     setBusy(true);
     try {
       let file_path = d.file_path, file_name = d.file_name;
       if (replace) {
+        const validTypes = ['application/pdf', 'image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+        if (!validTypes.includes(replace.type)) {
+          toast.error("Please upload a PDF or image file");
+          setBusy(false);
+          return;
+        }
+        
         const path = `${form.member_id}/${Date.now()}-${replace.name.replace(/[^\w.\-]+/g, "_")}`;
-        const up = await supabase.storage.from("documents").upload(path, replace, { contentType: replace.type || "application/octet-stream" });
+        const up = await supabase.storage.from("documents").upload(path, replace, { 
+          contentType: replace.type || "application/octet-stream" 
+        });
         if (up.error) throw up.error;
         await supabase.storage.from("documents").remove([d.file_path]);
-        file_path = path; file_name = replace.name;
+        file_path = path; 
+        file_name = replace.name;
       }
       const { error } = await supabase.from("documents").update({
         member_id: form.member_id,
@@ -349,10 +723,16 @@ function EditDialog({ d, members, onClose, onDone }: { d: Doc; members: Member[]
         file_path, file_name,
       }).eq("id", d.id);
       if (error) throw error;
-      toast.success("Saved"); onClose(); onDone();
-    } catch (e: any) { toast.error(e.message ?? "Save failed"); }
+      toast.success("Document updated successfully"); 
+      onClose(); 
+      onDone();
+    } catch (e: any) { 
+      toast.error(e.message ?? "Save failed"); 
+    }
     finally { setBusy(false); }
   };
+
+  const isImage = replace?.type?.startsWith('image/');
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
@@ -368,13 +748,45 @@ function EditDialog({ d, members, onClose, onDone }: { d: Doc; members: Member[]
               </SelectContent>
             </Select>
           </Field>
-          <Field label="Document Name"><Input value={form.document_name} onChange={(e) => setForm({ ...form, document_name: e.target.value })} /></Field>
+          <Field label="Document Name">
+            <Input 
+              value={form.document_name} 
+              onChange={(e) => setForm({ ...form, document_name: e.target.value })} 
+            />
+          </Field>
           <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Registration Number"><Input value={form.registration_number} onChange={(e) => setForm({ ...form, registration_number: e.target.value })} /></Field>
-            <Field label="Document Date"><Input type="date" value={form.document_date} onChange={(e) => setForm({ ...form, document_date: e.target.value })} /></Field>
+            <Field label="Registration Number">
+              <Input 
+                value={form.registration_number} 
+                onChange={(e) => setForm({ ...form, registration_number: e.target.value })} 
+              />
+            </Field>
+            <Field label="Document Date">
+              <Input 
+                type="date" 
+                value={form.document_date} 
+                onChange={(e) => setForm({ ...form, document_date: e.target.value })} 
+              />
+            </Field>
           </div>
           <Field label={`Replace file (current: ${d.file_name})`}>
-            <Input type="file" accept="application/pdf,image/*" onChange={(e) => setReplace(e.target.files?.[0] ?? null)} />
+            <Input 
+              type="file" 
+              accept="application/pdf,image/*" 
+              onChange={handleFileChange} 
+            />
+            {replace && (
+              <div className="mt-2">
+                <p className="text-xs text-muted-foreground">
+                  {replace.name} ({(replace.size / 1024).toFixed(1)} KB) - {replace.type.startsWith('image/') ? '🖼️ Image' : '📄 PDF'}
+                </p>
+                {isImage && preview && (
+                  <div className="mt-2 rounded-lg border overflow-hidden">
+                    <img src={preview} alt="Preview" className="max-h-48 w-full object-contain" />
+                  </div>
+                )}
+              </div>
+            )}
           </Field>
         </div>
         <DialogFooter>
@@ -411,7 +823,7 @@ function AddMemberDialog({ onDone }: { onDone: () => void }) {
         sort_order,
       });
       if (error) throw error;
-      toast.success("Member added");
+      toast.success("Member added successfully");
       setName("");
       setOpen(false);
       onDone();

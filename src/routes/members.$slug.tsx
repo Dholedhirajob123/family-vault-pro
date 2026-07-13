@@ -7,8 +7,14 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Download, Eye, Search, ArrowLeft, FileText, Lock, Loader2 } from "lucide-react";
+import { Download, Eye, Search, ArrowLeft, FileText, Lock, Loader2, Share2, MoreVertical } from "lucide-react";
 import { toast } from "sonner";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 export const Route = createFileRoute("/members/$slug")({
   component: MemberPage,
@@ -38,9 +44,6 @@ function MemberPage() {
   const [pwd, setPwd] = useState("");
   const [checking, setChecking] = useState(false);
   const [showReset, setShowReset] = useState(false);
-  const [resetPwd, setResetPwd] = useState("");
-  const [resetConfirmPwd, setResetConfirmPwd] = useState("");
-  const [resetting, setResetting] = useState(false);
 
   const memberQ = useQuery({
     queryKey: ["member", slug],
@@ -89,15 +92,61 @@ function MemberPage() {
   }, [docsQ.data, q]);
 
   const handleView = async (d: Doc) => {
-    try { window.open(await signedUrl(d.file_path), "_blank"); } catch { toast.error("Unable to open"); }
+    try { 
+      const url = await signedUrl(d.file_path);
+      window.open(url, "_blank"); 
+    } catch { 
+      toast.error("Unable to open document"); 
+    }
   };
+  
   const handleDownload = async (d: Doc) => {
     try {
       const url = await signedUrl(d.file_path);
       const a = document.createElement("a");
-      a.href = url; a.download = d.file_name;
-      document.body.appendChild(a); a.click(); a.remove();
-    } catch { toast.error("Unable to download"); }
+      a.href = url; 
+      a.download = d.file_name;
+      document.body.appendChild(a); 
+      a.click(); 
+      a.remove();
+      toast.success("Download started");
+    } catch { 
+      toast.error("Unable to download document"); 
+    }
+  };
+
+  const handleShare = async (d: Doc) => {
+    try {
+      const url = await signedUrl(d.file_path);
+      
+      // Format the share text
+      const shareText = `📄 *${d.document_name}*\n📋 Reg No: ${d.registration_number || 'N/A'}\n📅 Date: ${d.document_date ? new Date(d.document_date).toLocaleDateString() : 'N/A'}\n\n🔗 View/Download: ${url}`;
+      
+      // Try native share first (works on mobile)
+      if (navigator.share) {
+        try {
+          await navigator.share({
+            title: d.document_name,
+            text: shareText,
+            url: url,
+          });
+          return;
+        } catch (shareError: any) {
+          if (shareError.name === 'AbortError') {
+            return; // User cancelled
+          }
+        }
+      }
+      
+      // Fallback: Open WhatsApp with the text
+      const whatsappUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(shareText)}`;
+      window.open(whatsappUrl, '_blank');
+      
+    } catch (error: any) {
+      if (error.name !== 'AbortError') {
+        toast.error("Unable to share document");
+      }
+    }
   };
 
   const submitPassword = async () => {
@@ -112,27 +161,6 @@ function MemberPage() {
       setPwd("");
     } else {
       toast.error("Incorrect password");
-    }
-  };
-
-  const submitReset = async () => {
-    if (!resetPwd) return toast.error("Enter new password");
-    if (resetPwd !== resetConfirmPwd) return toast.error("Passwords do not match");
-    if (resetPwd.length < 3) return toast.error("Password must be at least 3 characters");
-    
-    setResetting(true);
-    try {
-      const { error } = await supabase.rpc("set_member_password", { _member_id: memberQ.data!.id, _new_password: resetPwd });
-      if (error) throw error;
-      toast.success("Password reset successful. Please enter your new password.");
-      setShowReset(false);
-      setResetPwd("");
-      setResetConfirmPwd("");
-      setPwd("");
-    } catch (e: any) {
-      toast.error(e.message ?? "Failed to reset password");
-    } finally {
-      setResetting(false);
     }
   };
 
@@ -186,43 +214,14 @@ function MemberPage() {
               <Lock className="h-6 w-6" />
             </div>
             <h1 className="text-xl font-bold">Reset Password</h1>
-            <p className="mt-1 text-sm text-muted-foreground">Create a new password for {m.name}</p>
-            <div className="mt-5 space-y-3 text-left">
-              <div>
-                <Label htmlFor="rp">New Password</Label>
-                <Input
-                  id="rp"
-                  type="password"
-                  value={resetPwd}
-                  onChange={(e) => setResetPwd(e.target.value)}
-                  className="rounded-xl"
-                  autoFocus
-                  placeholder="At least 3 characters"
-                />
-              </div>
-              <div>
-                <Label htmlFor="rcp">Confirm Password</Label>
-                <Input
-                  id="rcp"
-                  type="password"
-                  value={resetConfirmPwd}
-                  onChange={(e) => setResetConfirmPwd(e.target.value)}
-                  className="rounded-xl"
-                  placeholder="Re-enter password"
-                />
-                {resetPwd && resetConfirmPwd && resetPwd !== resetConfirmPwd && (
-                  <p className="mt-1 text-xs text-destructive">Passwords do not match</p>
-                )}
-              </div>
-              <Button onClick={submitReset} disabled={resetting || (resetPwd && resetPwd !== resetConfirmPwd)} className="w-full rounded-full gradient-primary border-0">
-                {resetting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Reset Password
-              </Button>
-            </div>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Please ask the admin to reset the password for {m.name} from the admin dashboard.
+            </p>
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => { setShowReset(false); setResetPwd(""); setResetConfirmPwd(""); }}
-              className="mt-3 text-xs text-muted-foreground hover:text-foreground w-full"
+              onClick={() => setShowReset(false)}
+              className="mt-4 text-xs text-muted-foreground hover:text-foreground w-full"
             >
               Back to login
             </Button>
@@ -265,9 +264,9 @@ function MemberPage() {
               <TableRow>
                 <TableHead className="w-12">Sr.</TableHead>
                 <TableHead>Document Name</TableHead>
-                <TableHead>Registration No.</TableHead>
-                <TableHead>Date</TableHead>
-                <TableHead>File</TableHead>
+                <TableHead className="hidden md:table-cell">Registration No.</TableHead>
+                <TableHead className="hidden md:table-cell">Date</TableHead>
+                <TableHead className="hidden sm:table-cell">File</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -282,23 +281,41 @@ function MemberPage() {
                 <TableRow key={d.id} className="hover:bg-accent/50">
                   <TableCell className="text-muted-foreground">{i + 1}</TableCell>
                   <TableCell className="font-medium">{d.document_name}</TableCell>
-                  <TableCell className="text-sm">{d.registration_number || <span className="text-muted-foreground">—</span>}</TableCell>
-                  <TableCell className="text-sm text-muted-foreground">
+                  <TableCell className="hidden md:table-cell text-sm">
+                    {d.registration_number || <span className="text-muted-foreground">—</span>}
+                  </TableCell>
+                  <TableCell className="hidden md:table-cell text-sm text-muted-foreground">
                     {d.document_date ? new Date(d.document_date).toLocaleDateString() : "—"}
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="hidden sm:table-cell">
                     <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                      <FileText className="h-3.5 w-3.5" /> <span className="max-w-[16ch] truncate">{d.file_name}</span>
+                      <FileText className="h-3.5 w-3.5" /> 
+                      <span className="max-w-[12ch] md:max-w-[16ch] truncate">{d.file_name}</span>
                     </div>
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-1">
-                      <Button size="sm" variant="ghost" className="rounded-full" onClick={() => handleView(d)}>
-                        <Eye className="mr-1 h-3.5 w-3.5" /> View
-                      </Button>
-                      <Button size="sm" variant="ghost" className="rounded-full" onClick={() => handleDownload(d)}>
-                        <Download className="mr-1 h-3.5 w-3.5" /> Download
-                      </Button>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button size="sm" variant="ghost" className="rounded-full h-8 w-8 p-0">
+                            <MoreVertical className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-48">
+                          <DropdownMenuItem onClick={() => handleView(d)} className="cursor-pointer">
+                            <Eye className="mr-2 h-4 w-4" />
+                            <span>View Document</span>
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleDownload(d)} className="cursor-pointer">
+                            <Download className="mr-2 h-4 w-4" />
+                            <span>Download</span>
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleShare(d)} className="cursor-pointer">
+                            <Share2 className="mr-2 h-4 w-4" />
+                            <span>Share</span>
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </div>
                   </TableCell>
                 </TableRow>
