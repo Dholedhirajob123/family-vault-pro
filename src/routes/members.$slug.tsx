@@ -118,36 +118,40 @@ function MemberPage() {
   const handleShare = async (d: Doc) => {
     try {
       const url = await signedUrl(d.file_path);
-      
-      // Format the share text
-      const shareText = `📄 *${d.document_name}*\n📋 Reg No: ${d.registration_number || 'N/A'}\n📅 Date: ${d.document_date ? new Date(d.document_date).toLocaleDateString() : 'N/A'}\n\n🔗 View/Download: ${url}`;
-      
-      // Try native share first (works on mobile)
-      if (navigator.share) {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error("fetch failed");
+      const blob = await res.blob();
+      const file = new File([blob], d.file_name, { type: blob.type || "application/octet-stream" });
+
+      const caption = `${d.document_name}${d.registration_number ? ` • Reg No: ${d.registration_number}` : ""}${d.document_date ? ` • ${new Date(d.document_date).toLocaleDateString()}` : ""}`;
+
+      // Share the actual file (PDF / image) via native share sheet
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
         try {
-          await navigator.share({
-            title: d.document_name,
-            text: shareText,
-            url: url,
-          });
+          await navigator.share({ files: [file], title: d.document_name, text: caption });
           return;
-        } catch (shareError: any) {
-          if (shareError.name === 'AbortError') {
-            return; // User cancelled
-          }
+        } catch (e: any) {
+          if (e?.name === "AbortError") return;
         }
       }
-      
-      // Fallback: Open WhatsApp with the text
-      const whatsappUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(shareText)}`;
-      window.open(whatsappUrl, '_blank');
-      
+
+      // Fallback: trigger a download of the file so user can attach it manually
+      const objUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = objUrl;
+      a.download = d.file_name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(objUrl);
+      toast.success("File downloaded — attach it in your chat app to share");
     } catch (error: any) {
-      if (error.name !== 'AbortError') {
+      if (error?.name !== "AbortError") {
         toast.error("Unable to share document");
       }
     }
   };
+
 
   const submitPassword = async () => {
     if (!pwd) return;

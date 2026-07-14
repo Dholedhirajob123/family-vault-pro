@@ -203,7 +203,7 @@ function MemberPasswordCard({ m, onDone }: { m: Member; onDone: () => void }) {
             </div>
             <DialogFooter>
               <Button variant="ghost" onClick={() => { setOpen(false); setPwd(""); setConfirmPwd(""); }}>Cancel</Button>
-              <Button onClick={save} disabled={busy || (pwd && pwd !== confirmPwd)} className="gradient-primary border-0">
+              <Button onClick={save} disabled={busy || (!!pwd && pwd !== confirmPwd)} className="gradient-primary border-0">
                 {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Save
               </Button>
             </DialogFooter>

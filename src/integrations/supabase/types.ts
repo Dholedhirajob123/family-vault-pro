@@ -14,6 +14,24 @@ export type Database = {
   }
   public: {
     Tables: {
+      app_settings: {
+        Row: {
+          key: string
+          updated_at: string
+          value: string | null
+        }
+        Insert: {
+          key: string
+          updated_at?: string
+          value?: string | null
+        }
+        Update: {
+          key?: string
+          updated_at?: string
+          value?: string | null
+        }
+        Relationships: []
+      }
       documents: {
         Row: {
           category: string
@@ -100,6 +118,50 @@ export type Database = {
         }
         Relationships: []
       }
+      password_reset_requests: {
+        Row: {
+          created_at: string
+          id: string
+          member_id: string | null
+          message: string | null
+          requester_contact: string | null
+          requester_name: string | null
+          resolved_at: string | null
+          scope: string
+          status: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          member_id?: string | null
+          message?: string | null
+          requester_contact?: string | null
+          requester_name?: string | null
+          resolved_at?: string | null
+          scope?: string
+          status?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          member_id?: string | null
+          message?: string | null
+          requester_contact?: string | null
+          requester_name?: string | null
+          resolved_at?: string | null
+          scope?: string
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "password_reset_requests_member_id_fkey"
+            columns: ["member_id"]
+            isOneToOne: false
+            referencedRelation: "family_members"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       user_roles: {
         Row: {
           created_at: string
@@ -138,10 +200,13 @@ export type Database = {
         Args: { _member_id: string; _new_password: string }
         Returns: boolean
       }
+      set_site_password: { Args: { _new_password: string }; Returns: boolean }
+      site_password_enabled: { Args: never; Returns: boolean }
       verify_member_password: {
         Args: { _password: string; _slug: string }
         Returns: boolean
       }
+      verify_site_password: { Args: { _password: string }; Returns: boolean }
     }
     Enums: {
       app_role: "admin" | "user"
