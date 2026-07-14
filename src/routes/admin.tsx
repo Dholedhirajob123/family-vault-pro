@@ -89,14 +89,33 @@ function AdminPage() {
           <p className="text-sm text-muted-foreground">Upload documents and set access passwords per family member.</p>
         </div>
         <div className="flex gap-2 flex-wrap">
+          <BulkPasswordDialog members={members} onDone={refreshAll} />
           <AddMemberDialog onDone={refreshAll} />
           <UploadDialog members={members} onDone={refreshAll} />
         </div>
       </div>
 
+      <Card className="glass rounded-3xl border-0 p-4 md:p-6">
+        <div className="mb-3 flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-bold">Family members & passwords</h2>
+            <p className="text-xs text-muted-foreground">Set, change, or reset the password required to view each member's documents.</p>
+          </div>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {members.map((m) => (
+            <MemberPasswordCard key={m.id} m={m} onDone={refreshAll} />
+          ))}
+          {members.length === 0 && (
+            <p className="text-sm text-muted-foreground">No members yet. Click "Add member" to create one.</p>
+          )}
+        </div>
+      </Card>
+
       <Card className="glass rounded-3xl border-0 p-4">
         <Input placeholder="Filter documents…" value={filter} onChange={(e) => setFilter(e.target.value)} className="max-w-sm rounded-full" />
       </Card>
+
 
       <Card className="glass rounded-3xl border-0 p-2 md:p-4">
         <div className="overflow-x-auto">
@@ -129,8 +148,67 @@ function AdminPage() {
   );
 }
 
+function BulkPasswordDialog({ members, onDone }: { members: Member[]; onDone: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [pwd, setPwd] = useState("");
+  const [confirmPwd, setConfirmPwd] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const apply = async () => {
+    if (!pwd) return toast.error("Enter a password");
+    if (pwd !== confirmPwd) return toast.error("Passwords do not match");
+    if (pwd.length < 3) return toast.error("Password must be at least 3 characters");
+    if (members.length === 0) return toast.error("No members to update");
+
+    setBusy(true);
+    let ok = 0, fail = 0;
+    for (const m of members) {
+      const { error } = await supabase.rpc("set_member_password", { _member_id: m.id, _new_password: pwd });
+      if (error) fail++; else ok++;
+    }
+    setBusy(false);
+    if (fail === 0) toast.success(`Password set for all ${ok} member${ok === 1 ? "" : "s"}`);
+    else toast.error(`Updated ${ok}, failed ${fail}`);
+    setPwd(""); setConfirmPwd(""); setOpen(false); onDone();
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="outline" className="rounded-full">
+          <KeyRound className="mr-2 h-4 w-4" /> Set password for all
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-w-sm">
+        <DialogHeader><DialogTitle>Set one password for all members</DialogTitle></DialogHeader>
+        <p className="text-sm text-muted-foreground">
+          This will overwrite the current password of all {members.length} member{members.length === 1 ? "" : "s"}.
+        </p>
+        <div className="grid gap-3">
+          <div>
+            <Label htmlFor="bulk-pw">New password</Label>
+            <Input id="bulk-pw" type="password" value={pwd} onChange={(e) => setPwd(e.target.value)} />
+          </div>
+          <div>
+            <Label htmlFor="bulk-cpw">Confirm password</Label>
+            <Input id="bulk-cpw" type="password" value={confirmPwd} onChange={(e) => setConfirmPwd(e.target.value)} />
+            {pwd !== confirmPwd && confirmPwd && <p className="mt-1 text-xs text-destructive">Passwords do not match</p>}
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" onClick={() => { setOpen(false); setPwd(""); setConfirmPwd(""); }}>Cancel</Button>
+          <Button onClick={apply} disabled={busy} className="gradient-primary border-0">
+            {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Apply to all
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function MemberPasswordCard({ m, onDone }: { m: Member; onDone: () => void }) {
   const [open, setOpen] = useState(false);
+
   const [pwd, setPwd] = useState("");
   const [confirmPwd, setConfirmPwd] = useState("");
   const [busy, setBusy] = useState(false);
