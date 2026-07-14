@@ -206,8 +206,9 @@ function BulkPasswordDialog({ members, onDone }: { members: Member[]; onDone: ()
   );
 }
 
-
+function MemberPasswordCard({ m, onDone }: { m: Member; onDone: () => void }) {
   const [open, setOpen] = useState(false);
+
   const [pwd, setPwd] = useState("");
   const [confirmPwd, setConfirmPwd] = useState("");
   const [busy, setBusy] = useState(false);
