@@ -62,9 +62,8 @@ function MemberPage() {
 
   useEffect(() => {
     if (!memberQ.data) return;
-    if (!hasPassword) { setUnlocked(true); return; }
     if (sessionStorage.getItem(`member-unlock:${slug}`) === "1") setUnlocked(true);
-  }, [memberQ.data, hasPassword, slug]);
+  }, [memberQ.data, slug]);
 
   const docsQ = useQuery({
     queryKey: ["docs", memberQ.data?.id],
