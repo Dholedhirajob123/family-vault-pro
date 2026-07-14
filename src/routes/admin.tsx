@@ -89,14 +89,33 @@ function AdminPage() {
           <p className="text-sm text-muted-foreground">Upload documents and set access passwords per family member.</p>
         </div>
         <div className="flex gap-2 flex-wrap">
+          <BulkPasswordDialog members={members} onDone={refreshAll} />
           <AddMemberDialog onDone={refreshAll} />
           <UploadDialog members={members} onDone={refreshAll} />
         </div>
       </div>
 
+      <Card className="glass rounded-3xl border-0 p-4 md:p-6">
+        <div className="mb-3 flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-bold">Family members & passwords</h2>
+            <p className="text-xs text-muted-foreground">Set, change, or reset the password required to view each member's documents.</p>
+          </div>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {members.map((m) => (
+            <MemberPasswordCard key={m.id} m={m} onDone={refreshAll} />
+          ))}
+          {members.length === 0 && (
+            <p className="text-sm text-muted-foreground">No members yet. Click "Add member" to create one.</p>
+          )}
+        </div>
+      </Card>
+
       <Card className="glass rounded-3xl border-0 p-4">
         <Input placeholder="Filter documents…" value={filter} onChange={(e) => setFilter(e.target.value)} className="max-w-sm rounded-full" />
       </Card>
+
 
       <Card className="glass rounded-3xl border-0 p-2 md:p-4">
         <div className="overflow-x-auto">
