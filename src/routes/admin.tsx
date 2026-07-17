@@ -19,8 +19,9 @@ import {
 import { toast } from "sonner";
 import { 
   Upload, Trash2, Pencil, Eye, Download, Loader2, KeyRound, 
-  Lock, Unlock, Plus, MoreVertical, Image, FileText, X
+  Lock, Unlock, Plus, MoreVertical, Image as ImageIcon, FileText, X, Camera, FilePlus
 } from "lucide-react";
+import { jsPDF } from "jspdf";
 
 export const Route = createFileRoute("/admin")({
   component: AdminPage,
@@ -337,7 +338,7 @@ function DocRow({ d, memberName, members, onChanged }: { d: Doc; memberName: str
   const getFileType = (fileName: string) => {
     const ext = fileName.split('.').pop()?.toLowerCase();
     if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'].includes(ext || '')) {
-      return { type: 'image', icon: Image, label: 'Image' };
+      return { type: 'image', icon: ImageIcon, label: 'Image' };
     }
     if (['pdf'].includes(ext || '')) {
       return { type: 'pdf', icon: FileText, label: 'PDF' };
@@ -404,85 +405,135 @@ function DocRow({ d, memberName, members, onChanged }: { d: Doc; memberName: str
   );
 }
 
+type CapturedImage = { id: string; file: File; dataUrl: string };
+
+async function imagesToPdf(images: CapturedImage[], baseName: string): Promise<File> {
+  const pdf = new jsPDF({ unit: "pt", format: "a4" });
+  const pageW = pdf.internal.pageSize.getWidth();
+  const pageH = pdf.internal.pageSize.getHeight();
+
+  for (let i = 0; i < images.length; i++) {
+    const { dataUrl } = images[i];
+    const img = await new Promise<HTMLImageElement>((res, rej) => {
+      const el = new window.Image();
+      el.onload = () => res(el);
+      el.onerror = rej;
+      el.src = dataUrl;
+    });
+    const ratio = Math.min(pageW / img.width, pageH / img.height);
+    const w = img.width * ratio;
+    const h = img.height * ratio;
+    const x = (pageW - w) / 2;
+    const y = (pageH - h) / 2;
+    if (i > 0) pdf.addPage();
+    const fmt = dataUrl.startsWith("data:image/png") ? "PNG" : "JPEG";
+    pdf.addImage(dataUrl, fmt, x, y, w, h);
+  }
+  const blob = pdf.output("blob");
+  return new File([blob], `${baseName || "document"}.pdf`, { type: "application/pdf" });
+}
+
+function readAsDataURL(file: File): Promise<string> {
+  return new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onloadend = () => res(r.result as string);
+    r.onerror = rej;
+    r.readAsDataURL(file);
+  });
+}
+
 function UploadDialog({ members, onDone }: { members: Member[]; onDone: () => void }) {
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({ member_id: "", document_name: "", registration_number: "", document_date: "" });
-  const [file, setFile] = useState<File | null>(null);
+  const [pdfFile, setPdfFile] = useState<File | null>(null);
+  const [images, setImages] = useState<CapturedImage[]>([]);
   const [busy, setBusy] = useState(false);
-  const [preview, setPreview] = useState<string | null>(null);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFile = e.target.files?.[0] ?? null;
-    setFile(selectedFile);
-    
-    if (selectedFile && selectedFile.type.startsWith('image/')) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setPreview(reader.result as string);
-      };
-      reader.readAsDataURL(selectedFile);
-    } else {
-      setPreview(null);
+  const reset = () => {
+    setPdfFile(null); setImages([]);
+    setForm({ member_id: "", document_name: "", registration_number: "", document_date: "" });
+  };
+
+  const addFiles = async (fileList: FileList | null) => {
+    if (!fileList || fileList.length === 0) return;
+    const arr = Array.from(fileList);
+    const pdf = arr.find((f) => f.type === "application/pdf");
+    if (pdf) {
+      setPdfFile(pdf); setImages([]);
+      return;
     }
+    const imgs = arr.filter((f) => f.type.startsWith("image/"));
+    if (imgs.length === 0) return toast.error("Select a PDF or image");
+    const captured: CapturedImage[] = [];
+    for (const f of imgs) {
+      captured.push({ id: `${Date.now()}-${Math.random()}`, file: f, dataUrl: await readAsDataURL(f) });
+    }
+    setPdfFile(null);
+    setImages((prev) => [...prev, ...captured]);
   };
 
-  const clearFile = () => {
-    setFile(null);
-    setPreview(null);
-  };
+  const removeImage = (id: string) => setImages((prev) => prev.filter((i) => i.id !== id));
 
-  const submit = async () => {
-    if (!file) return toast.error("Select a PDF or image");
+  const doUpload = async (mode: "keep" | "pdf") => {
     if (!form.member_id || !form.document_name) return toast.error("Fill required fields");
-    
-    // Validate file type
-    const validTypes = ['application/pdf', 'image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-    if (!validTypes.includes(file.type)) {
-      return toast.error("Please upload a PDF or image file (JPG, PNG, GIF, WEBP)");
+    let uploadFile: File | null = null;
+
+    if (pdfFile) {
+      uploadFile = pdfFile;
+    } else if (images.length > 0) {
+      if (mode === "pdf") {
+        try {
+          uploadFile = await imagesToPdf(images, form.document_name);
+        } catch (e: any) {
+          return toast.error("Failed to build PDF: " + (e?.message ?? ""));
+        }
+      } else {
+        if (images.length > 1) return toast.error("Keeping as image supports only 1 photo. Use 'Create PDF' for multiple, or remove extras.");
+        uploadFile = images[0].file;
+      }
+    } else {
+      return toast.error("Add a file or take a photo");
     }
-    
+
     setBusy(true);
     try {
-      const path = `${form.member_id}/${Date.now()}-${file.name.replace(/[^\w.\-]+/g, "_")}`;
-      const up = await supabase.storage.from("documents").upload(path, file, { 
-        contentType: file.type || "application/octet-stream" 
+      const safeName = uploadFile.name.replace(/[^\w.\-]+/g, "_");
+      const path = `${form.member_id}/${Date.now()}-${safeName}`;
+      const up = await supabase.storage.from("documents").upload(path, uploadFile, {
+        contentType: uploadFile.type || "application/octet-stream",
       });
       if (up.error) throw up.error;
-      
+
       const { data: userData } = await supabase.auth.getUser();
       const ins = await supabase.from("documents").insert({
         member_id: form.member_id,
         document_name: form.document_name,
         registration_number: form.registration_number || null,
         document_date: form.document_date || null,
-        category: file.type.startsWith('image/') ? 'Image' : 'Document',
+        category: uploadFile.type.startsWith("image/") ? "Image" : "Document",
         upload_date: new Date().toISOString().slice(0, 10),
         file_path: path,
-        file_name: file.name,
+        file_name: uploadFile.name,
         uploaded_by: userData.user?.id ?? null,
       });
       if (ins.error) throw ins.error;
-      
-      toast.success(`${file.type.startsWith('image/') ? 'Image' : 'Document'} uploaded successfully`);
-      setOpen(false); 
-      setFile(null);
-      setPreview(null);
-      setForm({ member_id: "", document_name: "", registration_number: "", document_date: "" });
-      onDone();
-    } catch (e: any) { 
-      toast.error(e.message ?? "Upload failed"); 
-    }
-    finally { setBusy(false); }
+
+      toast.success("Uploaded successfully");
+      setOpen(false); reset(); onDone();
+    } catch (e: any) {
+      toast.error(e.message ?? "Upload failed");
+    } finally { setBusy(false); }
   };
 
-  const isImage = file?.type?.startsWith('image/');
+  const hasImages = images.length > 0;
+  const hasPdf = !!pdfFile;
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) reset(); }}>
       <DialogTrigger asChild>
         <Button className="rounded-full gradient-primary border-0"><Upload className="mr-2 h-4 w-4" /> Upload</Button>
       </DialogTrigger>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader><DialogTitle>Upload Document</DialogTitle></DialogHeader>
         <div className="grid gap-3">
           <Field label="Family Member">
@@ -495,71 +546,84 @@ function UploadDialog({ members, onDone }: { members: Member[]; onDone: () => vo
             </Select>
           </Field>
           <Field label="Document Name">
-            <Input 
-              value={form.document_name} 
-              onChange={(e) => setForm({ ...form, document_name: e.target.value })} 
-              placeholder="e.g. Passport, Aadhaar, Photo" 
-            />
+            <Input value={form.document_name} onChange={(e) => setForm({ ...form, document_name: e.target.value })} placeholder="e.g. Passport, Aadhaar, Photo" />
           </Field>
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Registration Number">
-              <Input 
-                value={form.registration_number} 
-                onChange={(e) => setForm({ ...form, registration_number: e.target.value })} 
-                placeholder="e.g. A1234567" 
-              />
+              <Input value={form.registration_number} onChange={(e) => setForm({ ...form, registration_number: e.target.value })} placeholder="e.g. A1234567" />
             </Field>
             <Field label="Document Date">
-              <Input 
-                type="date" 
-                value={form.document_date} 
-                onChange={(e) => setForm({ ...form, document_date: e.target.value })} 
-              />
+              <Input type="date" value={form.document_date} onChange={(e) => setForm({ ...form, document_date: e.target.value })} />
             </Field>
           </div>
-          <Field label="File (PDF or Image)">
-            <div className="flex items-center gap-2">
-              <Input 
-                type="file" 
-                accept="application/pdf,image/*" 
-                onChange={handleFileChange}
-                className="flex-1"
-              />
-              {file && (
-                <Button 
-                  variant="ghost" 
-                  size="icon" 
-                  className="h-10 w-10 shrink-0 rounded-full"
-                  onClick={clearFile}
-                >
-                  <X className="h-4 w-4" />
+
+          <Field label="File / Photos">
+            <div className="flex flex-wrap gap-2">
+              <label className="inline-flex cursor-pointer items-center gap-2 rounded-full border bg-background/60 px-3 py-2 text-sm hover:bg-background">
+                <FilePlus className="h-4 w-4" /> Choose file(s)
+                <input type="file" accept="application/pdf,image/*" multiple className="hidden" onChange={(e) => { addFiles(e.target.files); e.target.value = ""; }} />
+              </label>
+              <label className="inline-flex cursor-pointer items-center gap-2 rounded-full border bg-background/60 px-3 py-2 text-sm hover:bg-background">
+                <Camera className="h-4 w-4" /> Take photo
+                <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => { addFiles(e.target.files); e.target.value = ""; }} />
+              </label>
+              {(hasPdf || hasImages) && (
+                <Button type="button" variant="ghost" size="sm" className="rounded-full" onClick={reset}>
+                  <X className="mr-1 h-3.5 w-3.5" /> Clear
                 </Button>
               )}
             </div>
-            {file && (
-              <div className="mt-2">
+
+            {hasPdf && (
+              <div className="mt-2 flex items-center gap-2 rounded-lg border p-2 text-sm">
+                <FileText className="h-4 w-4" />
+                <span className="truncate">{pdfFile!.name}</span>
+                <span className="ml-auto text-xs text-muted-foreground">{(pdfFile!.size / 1024).toFixed(1)} KB</span>
+              </div>
+            )}
+
+            {hasImages && (
+              <div className="mt-2 space-y-2">
+                <div className="grid grid-cols-3 gap-2">
+                  {images.map((img, idx) => (
+                    <div key={img.id} className="relative overflow-hidden rounded-lg border">
+                      <img src={img.dataUrl} alt={`page ${idx + 1}`} className="h-24 w-full object-cover" />
+                      <span className="absolute left-1 top-1 rounded bg-black/60 px-1.5 text-[10px] text-white">{idx + 1}</span>
+                      <button type="button" onClick={() => removeImage(img.id)} className="absolute right-1 top-1 rounded-full bg-black/60 p-0.5 text-white hover:bg-black/80">
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
                 <p className="text-xs text-muted-foreground">
-                  {file.name} ({(file.size / 1024).toFixed(1)} KB) - {file.type.startsWith('image/') ? '🖼️ Image' : '📄 PDF'}
+                  {images.length} photo{images.length === 1 ? "" : "s"} — choose how to upload below.
                 </p>
-                {isImage && preview && (
-                  <div className="mt-2 rounded-lg border overflow-hidden">
-                    <img src={preview} alt="Preview" className="max-h-48 w-full object-contain" />
-                  </div>
-                )}
               </div>
             )}
           </Field>
         </div>
-        <DialogFooter>
-          <Button variant="ghost" onClick={() => {
-            setOpen(false);
-            setFile(null);
-            setPreview(null);
-          }}>Cancel</Button>
-          <Button onClick={submit} disabled={busy || !file} className="gradient-primary border-0">
-            {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} 
-            Upload {file?.type?.startsWith('image/') ? 'Image' : 'Document'}
-          </Button>
+
+        <DialogFooter className="flex-col-reverse gap-2 sm:flex-row">
+          <Button variant="ghost" onClick={() => { setOpen(false); reset(); }}>Cancel</Button>
+          {hasPdf ? (
+            <Button onClick={() => doUpload("keep")} disabled={busy} className="gradient-primary border-0">
+              {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Upload PDF
+            </Button>
+          ) : hasImages ? (
+            <>
+              {images.length === 1 && (
+                <Button variant="outline" onClick={() => doUpload("keep")} disabled={busy} className="rounded-full">
+                  <ImageIcon className="mr-2 h-4 w-4" /> Keep as image
+                </Button>
+              )}
+              <Button onClick={() => doUpload("pdf")} disabled={busy} className="gradient-primary border-0">
+                {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                <FileText className="mr-2 h-4 w-4" /> Create PDF & upload
+              </Button>
+            </>
+          ) : (
+            <Button disabled className="gradient-primary border-0 opacity-50">Upload</Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>
