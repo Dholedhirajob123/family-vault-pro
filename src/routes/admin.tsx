@@ -338,7 +338,7 @@ function DocRow({ d, memberName, members, onChanged }: { d: Doc; memberName: str
   const getFileType = (fileName: string) => {
     const ext = fileName.split('.').pop()?.toLowerCase();
     if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'].includes(ext || '')) {
-      return { type: 'image', icon: Image, label: 'Image' };
+      return { type: 'image', icon: ImageIcon, label: 'Image' };
     }
     if (['pdf'].includes(ext || '')) {
       return { type: 'pdf', icon: FileText, label: 'PDF' };
