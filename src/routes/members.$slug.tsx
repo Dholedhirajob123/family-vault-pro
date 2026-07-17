@@ -44,6 +44,11 @@ function MemberPage() {
   const [pwd, setPwd] = useState("");
   const [checking, setChecking] = useState(false);
   const [showReset, setShowReset] = useState(false);
+  const [reqName, setReqName] = useState("");
+  const [reqContact, setReqContact] = useState("");
+  const [reqMsg, setReqMsg] = useState("");
+  const [submittingReq, setSubmittingReq] = useState(false);
+  const [reqSent, setReqSent] = useState(false);
 
   const memberQ = useQuery({
     queryKey: ["member", slug],
