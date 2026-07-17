@@ -44,6 +44,11 @@ function MemberPage() {
   const [pwd, setPwd] = useState("");
   const [checking, setChecking] = useState(false);
   const [showReset, setShowReset] = useState(false);
+  const [reqName, setReqName] = useState("");
+  const [reqContact, setReqContact] = useState("");
+  const [reqMsg, setReqMsg] = useState("");
+  const [submittingReq, setSubmittingReq] = useState(false);
+  const [reqSent, setReqSent] = useState(false);
 
   const memberQ = useQuery({
     queryKey: ["member", slug],
@@ -216,18 +221,74 @@ function MemberPage() {
             <div className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-2xl gradient-primary">
               <Lock className="h-6 w-6" />
             </div>
-            <h1 className="text-xl font-bold">Reset Password</h1>
-            <p className="mt-2 text-sm text-muted-foreground">
-              Please ask the admin to reset the password for {m.name} from the admin dashboard.
-            </p>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setShowReset(false)}
-              className="mt-4 text-xs text-muted-foreground hover:text-foreground w-full"
-            >
-              Back to login
-            </Button>
+            <h1 className="text-xl font-bold">Request password reset</h1>
+            {reqSent ? (
+              <>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  Your request has been sent to the admin. They will reset the password for {m.name} shortly.
+                </p>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => { setShowReset(false); setReqSent(false); }}
+                  className="mt-4 text-xs text-muted-foreground hover:text-foreground w-full"
+                >
+                  Back to login
+                </Button>
+              </>
+            ) : (
+              <>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  Send a request to the admin to reset the password for {m.name}.
+                </p>
+                <div className="mt-4 space-y-3 text-left">
+                  <div>
+                    <Label htmlFor="rn">Your name</Label>
+                    <Input id="rn" value={reqName} onChange={(e) => setReqName(e.target.value)} className="rounded-xl" />
+                  </div>
+                  <div>
+                    <Label htmlFor="rc">Contact (phone or email)</Label>
+                    <Input id="rc" value={reqContact} onChange={(e) => setReqContact(e.target.value)} className="rounded-xl" />
+                  </div>
+                  <div>
+                    <Label htmlFor="rm">Message (optional)</Label>
+                    <Input id="rm" value={reqMsg} onChange={(e) => setReqMsg(e.target.value)} className="rounded-xl" />
+                  </div>
+                  <Button
+                    onClick={async () => {
+                      if (!reqName.trim() || !reqContact.trim()) {
+                        toast.error("Please enter your name and contact");
+                        return;
+                      }
+                      setSubmittingReq(true);
+                      const { error } = await supabase.from("password_reset_requests").insert({
+                        member_id: m.id,
+                        scope: "member",
+                        requester_name: reqName.trim(),
+                        requester_contact: reqContact.trim(),
+                        message: reqMsg.trim() || null,
+                      });
+                      setSubmittingReq(false);
+                      if (error) return toast.error(error.message);
+                      setReqSent(true);
+                      setReqName(""); setReqContact(""); setReqMsg("");
+                    }}
+                    disabled={submittingReq}
+                    className="w-full rounded-full gradient-primary border-0"
+                  >
+                    {submittingReq && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Send request
+                  </Button>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowReset(false)}
+                  className="mt-3 text-xs text-muted-foreground hover:text-foreground w-full"
+                >
+                  Back to login
+                </Button>
+              </>
+            )}
           </Card>
         )}
       </div>
