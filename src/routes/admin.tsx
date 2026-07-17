@@ -19,8 +19,9 @@ import {
 import { toast } from "sonner";
 import { 
   Upload, Trash2, Pencil, Eye, Download, Loader2, KeyRound, 
-  Lock, Unlock, Plus, MoreVertical, Image, FileText, X
+  Lock, Unlock, Plus, MoreVertical, Image as ImageIcon, FileText, X, Camera, FilePlus
 } from "lucide-react";
+import { jsPDF } from "jspdf";
 
 export const Route = createFileRoute("/admin")({
   component: AdminPage,
